@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import cast
+
 from titanic_mcp.database import Database
 from titanic_mcp.models import QueryDataInput
 from titanic_mcp.queries import TABLES, build_response, compile_query, query_data
@@ -199,7 +201,7 @@ def test_descending_order_returns_non_increasing_fares(database: Database) -> No
         ),
     )
 
-    fares = [row["fare"] for row in response.rows]
+    fares = [cast(float, row["fare"]) for row in response.rows]
     assert fares == sorted(fares, reverse=True)
 
 
@@ -218,4 +220,6 @@ def test_ties_are_broken_by_the_id_tiebreaker(database: Database) -> None:
     for index in range(1, len(rows)):
         previous, current = rows[index - 1], rows[index]
         if current["survived"] == previous["survived"]:
-            assert current["passenger_id"] > previous["passenger_id"]
+            assert cast(int, current["passenger_id"]) > cast(
+                int, previous["passenger_id"]
+            )

@@ -3,7 +3,11 @@ from __future__ import annotations
 import inspect
 import sys
 
-from titanic_mcp.errors import QueryValidationError
+from titanic_mcp.errors import (
+    InvalidArgumentsError,
+    QueryValidationError,
+    SafeToolError,
+)
 
 
 def test_field_paths_are_normalized_and_deduplicated() -> None:
@@ -37,6 +41,28 @@ def test_detail_is_not_part_of_the_safe_string() -> None:
     assert "secret" not in str(error)
     assert "secret" not in repr(error)
     assert error.detail == "value 'secret' is invalid"
+
+
+def test_invalid_arguments_error_uses_the_safe_path_format() -> None:
+    error = InvalidArgumentsError([" limit ", "filter[0].op", "limit"])
+
+    assert error.field_paths == ("filter[0].op", "limit")
+    assert str(error) == "Invalid arguments: filter[0].op, limit"
+    assert error.detail == "Invalid tool arguments."
+
+
+def test_invalid_arguments_error_falls_back_to_request() -> None:
+    error = InvalidArgumentsError([])
+
+    assert error.field_paths == ("request",)
+    assert str(error) == "Invalid arguments: request"
+
+
+def test_safe_tool_error_exposes_only_its_safe_message() -> None:
+    error = SafeToolError("The catalog is unavailable.")
+
+    assert str(error) == "The catalog is unavailable."
+    assert "unavailable" in repr(error)
 
 
 def test_errors_module_has_no_framework_imports() -> None:

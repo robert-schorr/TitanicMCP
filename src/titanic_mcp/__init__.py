@@ -1,2 +1,3 @@
-def main() -> None:
-    print("Hello from titanic_mcp!")
+from .server import main
+
+__all__ = ["main"]

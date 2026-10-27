@@ -13,13 +13,22 @@ class QueryValidationError(ValueError):
     def __init__(self, field_paths: str | Iterable[str], detail: str) -> None:
         self.field_paths = _normalize_field_paths(field_paths)
         self.detail = detail
-        super().__init__(self._safe_message())
+        super().__init__(f"Invalid arguments: {', '.join(self.field_paths)}")
 
-    def _safe_message(self) -> str:
-        return f"Invalid arguments: {', '.join(self.field_paths)}"
 
-    def __str__(self) -> str:
-        return self._safe_message()
+class InvalidArgumentsError(QueryValidationError):
+    """A tool-level argument failure with a client-safe field path list."""
+
+    def __init__(
+        self,
+        field_paths: str | Iterable[str],
+        detail: str = "Invalid tool arguments.",
+    ) -> None:
+        super().__init__(field_paths, detail)
+
+
+class SafeToolError(Exception):
+    """An error whose message is explicitly safe to return to clients."""
 
 
 def _normalize_field_paths(field_paths: str | Iterable[str]) -> tuple[str, ...]:

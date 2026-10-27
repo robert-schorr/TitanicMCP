@@ -63,7 +63,9 @@ No tool handler builds SQL or opens a database directly.
 - `InvalidArgumentsError(field_paths)`
 - `SafeToolError(message)`
 
-`ToolCallMiddleware.on_call_tool` maps:
+FastMCP masks unclassified exceptions before middleware sees them, so the tool
+wrapper re-raises domain errors as a classified `ToolError`. The middleware then
+maps:
 
 | Condition | Client message | `status` | `error_type` |
 |---|---|---|---|

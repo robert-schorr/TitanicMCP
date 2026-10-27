@@ -17,14 +17,15 @@ from __future__ import annotations
 import sqlite3
 import sys
 from pathlib import Path
+from typing import cast
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
-from titanic_mcp.database import Database  # noqa: E402
-from titanic_mcp.errors import QueryValidationError  # noqa: E402
-from titanic_mcp.models import FilterOperator, QueryDataInput  # noqa: E402
-from titanic_mcp.queries import (  # noqa: E402
+from titanic_mcp.database import Database
+from titanic_mcp.errors import QueryValidationError
+from titanic_mcp.models import FilterOperator, QueryDataInput
+from titanic_mcp.queries import (
     describe_table,
     list_tables,
     query_data,
@@ -104,7 +105,7 @@ def main() -> int:
     tables = list_tables(db)
     check(
         "list_tables returns the 9-entry catalog",
-        [t.name for t in tables][0] == "passengers" and len(tables) == 9,
+        tables[0].name == "passengers" and len(tables) == 9,
         f"{len(tables)} tables",
     )
 
@@ -168,7 +169,7 @@ def main() -> int:
             }
         ),
     )
-    fares = [r["fare"] for r in top_fares.rows]
+    fares = [cast(float, r["fare"]) for r in top_fares.rows]
     check("DESC ordering is honored", fares == sorted(fares, reverse=True), str(fares))
 
     # The compiled ORDER BY forces nulls last regardless of direction; 158 of
