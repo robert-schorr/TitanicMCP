@@ -1,9 +1,11 @@
 """Smoke-test the Titanic MCP server.
 
-In-process by default; add --stdio to test the real `titanic-mcp` entrypoint.
+In-process by default; pass --http to test a running Streamable HTTP server.
 
     uv run python scripts/smoke_test.py
-    uv run python scripts/smoke_test.py --stdio
+    uv run titanic-mcp
+    uv run python scripts/smoke_test.py --http
+    uv run python scripts/smoke_test.py --http http://127.0.0.1:8000/mcp
 """
 
 from __future__ import annotations
@@ -14,10 +16,12 @@ import json
 from typing import Any
 
 from fastmcp import Client
-from fastmcp.client.transports import StdioTransport
+from fastmcp.client.transports import StreamableHttpTransport
 from mcp_types import TextContent
 
 from titanic_mcp.server import create_app
+
+DEFAULT_HTTP_URL = "http://127.0.0.1:8000/mcp"
 
 
 def show(label: str, data: Any) -> None:
@@ -67,15 +71,20 @@ async def run(client: Client) -> None:
 async def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--stdio",
-        action="store_true",
-        help="test the titanic-mcp entrypoint over stdio",
+        "--http",
+        nargs="?",
+        const=DEFAULT_HTTP_URL,
+        metavar="URL",
+        help=(f"test a running Streamable HTTP server (default: {DEFAULT_HTTP_URL})"),
     )
     args = parser.parse_args()
 
-    if args.stdio:
-        transport = StdioTransport(command="uv", args=["run", "titanic-mcp"], cwd=".")
-        async with Client(transport, timeout=90) as client:
+    if args.http:
+        print(f"Connecting to {args.http}")
+        async with Client(
+            StreamableHttpTransport(url=args.http),
+            timeout=90,
+        ) as client:
             await run(client)
     else:
         async with Client(create_app()) as client:

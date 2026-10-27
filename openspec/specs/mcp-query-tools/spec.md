@@ -57,9 +57,10 @@ The server SHALL advertise exactly three tools: `list_tables`, `describe_table`,
 
 ### Requirement: Runnable MCP entrypoint
 
-The package SHALL provide the `titanic-mcp` entrypoint that starts the MCP server without requiring a separate HTTP deployment.
+The package SHALL provide the `titanic-mcp` entrypoint that starts the MCP server as a Streamable HTTP service at `/mcp` using the default local profile.
 
-#### Scenario: Entrypoint starts the server
+#### Scenario: Entrypoint serves over HTTP
 
-- **WHEN** `titanic-mcp` is started over the default stdio transport
-- **THEN** an MCP client can initialize the session and list the three tools
+- **WHEN** `titanic-mcp` is started without deployment overrides
+- **THEN** it listens on `127.0.0.1:8000`
+- **AND** an MCP client can initialize a session at `/mcp` and list the three tools

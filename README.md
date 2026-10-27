@@ -1,11 +1,9 @@
 # Titanic MCP
 
 A read-only MCP server for the Titanic passenger manifest. It exposes the query
-core through three typed tools and runs over stdio for this increment.
-
-> **Transport note:** the default `titanic-mcp` entrypoint uses **stdio** for
-> this change. Production Streamable HTTP serving, health checks, profiles,
-> authentication, and host/origin controls arrive in `add-mcp-http-service`.
+core through three typed tools and serves MCP over Streamable HTTP with safe
+local defaults, an operational health endpoint, and explicit local, container,
+and remote profiles.
 
 ## Setup
 
@@ -25,34 +23,139 @@ database, and every query is bounded.
 uv run titanic-mcp
 ```
 
-The process speaks MCP over stdin/stdout. Logs are written to stderr so they do
-not corrupt the protocol stream.
+By default the server listens on `http://127.0.0.1:8000/mcp`. The default
+profile is `local`: loopback-only, unauthenticated, stateless, and protected
+against untrusted Host and Origin headers. Logs are written to stderr.
+
+### Health check
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:8000/healthz
+```
+
+```json
+{ "status": "ok" }
+```
+
+`GET /healthz` returns 200 once the HTTP app is accepting requests. It does not
+require MCP initialization or an authentication token, so it is suitable for
+container and load-balancer probes.
 
 ### MCP client configuration
 
-Use the absolute path to this repository. For example, in an MCP client that
-accepts a JSON server map:
+Point an MCP client that supports Streamable HTTP at the `/mcp` endpoint:
 
 ```json
 {
   "mcpServers": {
     "titanic": {
-      "command": "uv",
-      "args": [
-        "run",
-        "--directory",
-        "C:\\Users\\Robert\\Documents\\Python Projects\\TitanicMCP",
-        "titanic-mcp"
-      ]
+      "url": "http://127.0.0.1:8000/mcp"
     }
   }
 }
 ```
 
-Start the client, initialize the session, list tools, and call any tool. The
-server exposes exactly `list_tables`, `describe_table`, and `query_data`.
+Start the server before connecting the client, then list tools and call
+`list_tables`. The server exposes exactly `list_tables`, `describe_table`, and
+`query_data`.
+
+## Configuration
+
+Configuration comes from environment variables. Blank values are treated as
+unset.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `TITANIC_MCP_DB_PATH` | `data/titanic.db` | Read-only SQLite file |
+| `TITANIC_MCP_HOST` | `127.0.0.1` for `local`; `0.0.0.0` for `container` and `remote` | Bind host |
+| `TITANIC_MCP_PORT` | `8000` | Bind port |
+| `MCP_PROFILE` | `local` | `local`, `container`, or `remote` |
+| `MCP_AUTH_TOKEN` | unset | Optional bearer token; required for `remote` |
+| `MCP_ALLOWED_HOSTS` | unset | Comma-separated Host allowlist; required for `container` and `remote` |
+| `MCP_ALLOWED_ORIGINS` | unset | Comma-separated Origin allowlist |
+| `TITANIC_MCP_LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR`, or `CRITICAL` |
+| `TITANIC_MCP_LOG_FORMAT` | `json` | `json` or `text` |
+
+### Profiles
+
+| Profile | Default bind | Authentication | Sessions | Host/origin protection |
+|---|---|---|---|---|
+| `local` | `127.0.0.1:8000` | None | Stateless | Automatic loopback protection |
+| `container` | `0.0.0.0:8000` | Optional | Stateful | Strict; `MCP_ALLOWED_HOSTS` required |
+| `remote` | `0.0.0.0:8000` | Required | Stateful | Strict; token and `MCP_ALLOWED_HOSTS` required |
+
+Startup validation fails before the app accepts requests when settings are
+contradictory:
+
+- `local` rejects a non-loopback bind host.
+- `container` requires a non-empty `MCP_ALLOWED_HOSTS`.
+- `remote` requires a non-empty `MCP_AUTH_TOKEN` and `MCP_ALLOWED_HOSTS`.
+
+The error names the missing or invalid setting.
+
+### Remote profile example
+
+```powershell
+$env:MCP_PROFILE = "remote"
+$env:TITANIC_MCP_HOST = "0.0.0.0"
+$env:MCP_AUTH_TOKEN = "<long-random-token>"
+$env:MCP_ALLOWED_HOSTS = "mcp.example.com"
+$env:MCP_ALLOWED_ORIGINS = "https://app.example.com"  # optional
+uv run titanic-mcp
+```
+
+The client must then send `Authorization: Bearer <long-random-token>`. Use a
+reverse proxy for TLS termination; the server itself does not provide TLS.
+
+### Container profile example
+
+```powershell
+$env:MCP_PROFILE = "container"
+$env:MCP_ALLOWED_HOSTS = "localhost:8000,127.0.0.1:8000"
+uv run titanic-mcp
+```
+
+The `container` profile binds all interfaces inside the container and permits
+token omission because the deployment must publish the port only on loopback.
+See the exposure warning below.
+
+## Authentication
+
+When `MCP_AUTH_TOKEN` is set, MCP requests must include
+`Authorization: Bearer <token>`. Missing or invalid tokens receive HTTP 401 and
+never reach tool execution. `GET /healthz` bypasses authentication.
+
+Authentication uses FastMCP's static token verifier. It is suitable for a
+private, read-only service; it is not OAuth, does not provide user accounts, and
+stores the configured token in memory. The token is read from the environment
+and never logged, returned to clients, or embedded in source.
+
+## Host and origin protection
+
+Host/origin protection rejects requests before MCP handling:
+
+- A Host that is not allowed receives HTTP 421.
+- An Origin that is not allowed receives HTTP 403.
+- `GET /healthz` remains reachable for probes.
+
+`local` uses automatic protection for loopback-bound serving. `container` and
+`remote` use strict protection and require an explicit `MCP_ALLOWED_HOSTS`.
+`MCP_ALLOWED_ORIGINS` is optional; set it when a browser client must call the
+server cross-origin.
+
+Host/origin protection is not CORS. Browser JavaScript that must read
+cross-origin responses still needs separate CORS configuration at the client or
+proxy layer.
+
+> **Exposure warning:** the bind address is not the same as public exposure.
+> The `local` profile rejects non-loopback binds. The `container` profile binds
+> `0.0.0.0` inside its network namespace, so the deployment must publish it only
+> to loopback. Before exposing the service externally, use the `remote` profile
+> with a strong token, an explicit host allowlist, and TLS termination at a
+> reverse proxy.
 
 ## Tools
+
 
 ### `list_tables`
 
