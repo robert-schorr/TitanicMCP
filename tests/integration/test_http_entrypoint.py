@@ -58,6 +58,29 @@ def _clear_environment(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv(name, raising=False)
 
 
+def _subprocess_environment(**overrides: str) -> dict[str, str]:
+    environment = {
+        name: value
+        for name, value in os.environ.items()
+        if name not in ENVIRONMENT_VARIABLES
+    }
+    environment.update(overrides)
+    return environment
+
+
+def test_subprocess_environment_drops_server_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MCP_AUTH_TOKEN", "inherited-token")
+    monkeypatch.setenv("TITANIC_MCP_DB_PATH", "inherited.db")
+
+    environment = _subprocess_environment(MCP_PROFILE="local")
+
+    assert "MCP_AUTH_TOKEN" not in environment
+    assert "TITANIC_MCP_DB_PATH" not in environment
+    assert environment["MCP_PROFILE"] == "local"
+
+
 def test_main_starts_http_on_loopback_8000(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -75,6 +98,7 @@ def test_main_starts_http_on_loopback_8000(
         "host_origin_protection": "auto",
         "allowed_hosts": None,
         "allowed_origins": None,
+        "show_banner": False,
     }
     assert captured["logging"] == {"level": "INFO", "json_output": True}
     assert captured["auth"] is None
@@ -105,7 +129,12 @@ def test_main_uses_the_configured_database_path(
 
     def record_database(path: Path) -> object:
         recorded["path"] = path
-        return object()
+
+        class FakeDatabase:
+            def fetch_one(self, sql: str) -> dict[str, int]:
+                return {"1": 1}
+
+        return FakeDatabase()
 
     monkeypatch.setattr(server_module, "Database", record_database)
 
@@ -113,6 +142,21 @@ def test_main_uses_the_configured_database_path(
 
     assert recorded["path"] == Path("custom/titanic.db")
     assert captured["transport"] == "http"
+
+
+def test_main_fails_before_serving_when_database_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _clear_environment(monkeypatch)
+    monkeypatch.setenv("TITANIC_MCP_DB_PATH", str(tmp_path / "missing.db"))
+    captured = _capture_run(monkeypatch)
+
+    with pytest.raises(SystemExit) as exc_info:
+        main()
+
+    assert "database is not readable" in str(exc_info.value)
+    assert "transport" not in captured
 
 
 def test_main_starts_the_remote_profile(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -133,6 +177,7 @@ def test_main_starts_the_remote_profile(monkeypatch: pytest.MonkeyPatch) -> None
         "host_origin_protection": True,
         "allowed_hosts": ["mcp.example.com", "localhost:8000"],
         "allowed_origins": ["https://app.example"],
+        "show_banner": False,
     }
     assert captured["auth"] is not None
 
@@ -283,12 +328,11 @@ async def test_http_entrypoint_serves_mcp(project_root: Path) -> None:
     uv_path = shutil.which("uv")
     assert uv_path is not None, "uv must be on PATH for the entrypoint smoke test"
     port = _free_port()
-    environment = {
-        **os.environ,
-        "TITANIC_MCP_HOST": "127.0.0.1",
-        "TITANIC_MCP_PORT": str(port),
-        "MCP_PROFILE": "local",
-    }
+    environment = _subprocess_environment(
+        TITANIC_MCP_HOST="127.0.0.1",
+        TITANIC_MCP_PORT=str(port),
+        MCP_PROFILE="local",
+    )
     process = await asyncio.create_subprocess_exec(
         uv_path,
         "run",
@@ -324,14 +368,13 @@ async def test_remote_entrypoint_requires_token_and_never_logs_it(
 ) -> None:
     port = _free_port()
     token = "entrypoint-secret-9c1a4e"
-    environment = {
-        **os.environ,
-        "TITANIC_MCP_HOST": "127.0.0.1",
-        "TITANIC_MCP_PORT": str(port),
-        "MCP_PROFILE": "remote",
-        "MCP_AUTH_TOKEN": token,
-        "MCP_ALLOWED_HOSTS": f"127.0.0.1:{port}",
-    }
+    environment = _subprocess_environment(
+        TITANIC_MCP_HOST="127.0.0.1",
+        TITANIC_MCP_PORT=str(port),
+        MCP_PROFILE="remote",
+        MCP_AUTH_TOKEN=token,
+        MCP_ALLOWED_HOSTS=f"127.0.0.1:{port}",
+    )
     process = await asyncio.create_subprocess_exec(
         sys.executable,
         "-c",

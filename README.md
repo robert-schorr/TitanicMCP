@@ -16,8 +16,11 @@ uv sync
 uv run pytest
 ```
 
+Run `uv run pytest --cov=titanic_mcp` to include coverage.
+
 The server reads `data/titanic.db` in read-only mode. No tool writes to the
-database, and every query is bounded.
+database, and every query is bounded. The database is opened at startup; the
+server exits with a clear error if it is missing or unreadable.
 
 ## Run the server
 
@@ -77,6 +80,9 @@ unset.
 | `MCP_ALLOWED_ORIGINS` | unset | Comma-separated Origin allowlist |
 | `TITANIC_MCP_LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR`, or `CRITICAL` |
 | `TITANIC_MCP_LOG_FORMAT` | `json` | `json` or `text` |
+
+The default database path is relative to an editable checkout. When the package
+is installed non-editable, set `TITANIC_MCP_DB_PATH` explicitly.
 
 ### Profiles
 
@@ -140,12 +146,12 @@ must exist on the host.
 docker compose build
 ```
 
-The multi-stage build uses `python:3.13-slim` and a pinned
-`ghcr.io/astral-sh/uv` image. It installs from `uv.lock` with
-`--frozen --no-dev --no-editable` and copies only the prepared virtual
-environment and application source into the runtime stage. The runtime image
-contains no compiler toolchain, uv cache, project tests or test dependencies,
-database file, or secrets.
+The multi-stage build uses the Debian Trixie slim variant for the uv builder
+and the `python:3.13-slim-trixie` runtime. It installs from `uv.lock` with
+`--frozen --no-default-groups --no-editable` and copies only the prepared virtual
+environment into the runtime stage. The runtime image contains no compiler
+toolchain, uv cache, project tests or test dependencies, database file, or
+secrets.
 
 ### Run the default profile
 
@@ -156,8 +162,9 @@ docker compose up -d
 The default profile sets `MCP_PROFILE=container` and
 `MCP_ALLOWED_HOSTS=localhost:8000,127.0.0.1:8000`, binds `0.0.0.0` inside the
 container, and publishes `127.0.0.1:8000` only. It also uses a read-only root
-filesystem, a read-only database mount, `no-new-privileges`, and a 64 MB
-`noexec,nosuid` tmpfs at `/tmp`.
+filesystem, a read-only database mount, `no-new-privileges`, a 64 MB
+`noexec,nosuid` tmpfs at `/tmp`, and resource limits of 1 CPU, 512 MB memory,
+and 64 PIDs.
 
 Point the MCP client at `http://127.0.0.1:8000/mcp` using the client
 configuration shown above. No token is required for the default profile
@@ -178,6 +185,18 @@ docker inspect --format '{{.State.Health.Status}}' (docker compose ps -q titanic
 `GET /healthz` returns 200 without MCP initialization or authentication.
 `docker compose ps` reports `(healthy)` once the service is accepting requests.
 
+### Test the container deployment
+
+With Docker running:
+
+```powershell
+uv run python scripts/test_container.py
+```
+
+The script builds `titanic-mcp:container-test`, starts it with the Compose
+security settings, waits for `/healthz`, calls `list_tables`, and verifies the
+process runs as UID 10001. It is intentionally separate from `uv run pytest`.
+
 ### Run the remote overlay
 
 The remote overlay publishes port 8000 on all interfaces and requires a token
@@ -193,8 +212,8 @@ docker compose -f compose.yaml -f compose.remote.yaml up -d
 
 The overlay sets `MCP_PROFILE=remote`, replaces the loopback mapping with
 `8000:8000`, and inherits the read-only filesystem, tmpfs, read-only database
-mount, `no-new-privileges`, restart policy, and healthcheck from
-`compose.yaml`.
+mount, `no-new-privileges`, resource limits, restart policy, and healthcheck
+from `compose.yaml`.
 
 MCP clients must send `Authorization: Bearer <long-random-token>`. Requests
 without a valid token receive HTTP 401. Use the public host value in
@@ -226,8 +245,9 @@ docker compose down
   `MCP_ALLOWED_HOSTS` or `MCP_ALLOWED_ORIGINS`.
 - The container exits with a configuration error: `MCP_PROFILE=remote` requires
   both `MCP_AUTH_TOKEN` and `MCP_ALLOWED_HOSTS`.
-- Queries fail because the database is missing: ensure `data/titanic.db`
+- The server exits because the database is missing: ensure `data/titanic.db`
   exists; the container mounts it read-only and never copies it into the image.
+  When running an installed package outside the repo, set `TITANIC_MCP_DB_PATH`.
 - Port 8000 is already in use: stop the local `uv run titanic-mcp` process or
   the other container using the port, then retry.
 - Source changes are not visible: rebuild with

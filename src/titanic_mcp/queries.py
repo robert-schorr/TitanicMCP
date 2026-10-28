@@ -38,6 +38,8 @@ TEXT_OPERATORS = frozenset(
         FilterOperator.not_null,
     }
 )
+SQLITE_INTEGER_MIN = -(2**63)
+SQLITE_INTEGER_MAX = 2**63 - 1
 
 
 class SupportsCount(Protocol):
@@ -63,7 +65,6 @@ class CompiledQuery:
     sql: str
     params: tuple[object, ...]
     columns: list[str]
-    fetch_limit: int
 
 
 @dataclass(frozen=True)
@@ -528,12 +529,15 @@ def _validate_scalar_value(index: int, column: ColumnSpec, value: object) -> Non
 def _value_matches(column_type: ColumnType, value: object) -> bool:
     if column_type is ColumnType.text:
         return isinstance(value, str)
-    if column_type is ColumnType.integer:
-        return isinstance(value, int) and not isinstance(value, bool)
-    if column_type is ColumnType.number:
-        return isinstance(value, (int, float)) and not isinstance(value, bool)
     if column_type is ColumnType.boolean:
         return isinstance(value, bool) or (isinstance(value, int) and value in (0, 1))
+    if isinstance(value, bool):
+        return False
+    # SQLite only binds signed 64-bit integers.
+    if isinstance(value, int):
+        return SQLITE_INTEGER_MIN <= value <= SQLITE_INTEGER_MAX
+    if column_type is ColumnType.number:
+        return isinstance(value, float)
     return False
 
 
@@ -607,7 +611,6 @@ def compile_query(request: QueryDataInput) -> CompiledQuery:
         sql="\n".join(sql_parts),
         params=tuple(params),
         columns=selected_columns,
-        fetch_limit=request.limit + 1,
     )
 
 

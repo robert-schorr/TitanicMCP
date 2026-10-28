@@ -23,6 +23,13 @@ services:
     security_opt:
       - no-new-privileges:true
     restart: unless-stopped
+    # Read-only SQLite workload: well within 1 CPU and 512 MB; pids cap bounds fork storms.
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512m
+          pids: 64
     healthcheck:
       test:
         - CMD

@@ -3,6 +3,7 @@ from __future__ import annotations
 import ipaddress
 import logging
 import os
+import sqlite3
 import time
 import uuid
 from collections.abc import Iterable, Mapping, Sequence
@@ -531,6 +532,13 @@ def main() -> None:
     except ConfigurationError as exc:
         raise SystemExit(f"Configuration error: {exc}") from exc
 
+    try:
+        Database(config.database_path).fetch_one("SELECT 1")
+    except (OSError, sqlite3.Error) as exc:
+        raise SystemExit(
+            f"Configuration error: database is not readable: {config.database_path}"
+        ) from exc
+
     configure_logging(
         level=config.log_level,
         json_output=config.log_format == "json",
@@ -544,4 +552,5 @@ def main() -> None:
         host_origin_protection=config.host_origin_protection,
         allowed_hosts=list(config.allowed_hosts) or None,
         allowed_origins=list(config.allowed_origins) or None,
+        show_banner=False,
     )

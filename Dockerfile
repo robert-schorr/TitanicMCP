@@ -12,15 +12,15 @@ WORKDIR /app
 COPY pyproject.toml uv.lock ./
 
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --no-editable --no-install-project
+    uv sync --frozen --no-default-groups --no-editable --no-install-project
 
 COPY README.md ./
 COPY src ./src
 
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --no-editable
+    uv sync --frozen --no-default-groups --no-editable
 
-FROM python:3.13-slim AS runtime
+FROM python:3.13-slim-trixie AS runtime
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -36,7 +36,6 @@ RUN groupadd --gid 10001 titanic \
 WORKDIR /app
 
 COPY --from=builder --chown=titanic:titanic /app/.venv /app/.venv
-COPY --from=builder --chown=titanic:titanic /app/src /app/src
 
 USER titanic
 

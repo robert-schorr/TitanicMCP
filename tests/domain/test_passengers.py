@@ -32,6 +32,20 @@ def test_passenger_row_count(database: Database) -> None:
     assert description.row_count == 891
 
 
+def test_integer_filter_accepts_sqlite_boundaries(database: Database) -> None:
+    for value in (-(2**63), 2**63 - 1):
+        response = query_data(
+            database,
+            QueryDataInput(
+                table="passengers",
+                filter=[{"column": "passenger_id", "op": "eq", "value": value}],
+                limit=1,
+            ),
+        )
+
+        assert response.row_count == 0
+
+
 def test_documented_first_row(database: Database) -> None:
     response = query_data(
         database,

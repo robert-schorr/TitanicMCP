@@ -1,7 +1,7 @@
 [project]
 name = "titanic_mcp"
 version = "0.1.0"
-description = "Add your description here"
+description = "Read-only MCP server for the Titanic passenger dataset."
 readme = "README.md"
 authors = [
     { name = "Robert Schorr", email = "<>" }
@@ -25,12 +25,14 @@ dev = [
     "ty>=0.0.92",
 ]
 test = [
-    "httpx>=0.28.1",
     "httpx2>=2.16.0",
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.1",
     "pytest-cov>=7.1.0",
 ]
+
+[tool.uv]
+default-groups = ["dev", "test"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

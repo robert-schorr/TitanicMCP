@@ -172,6 +172,32 @@ def test_number_columns_accept_integers_and_floats() -> None:
         )
 
 
+@pytest.mark.parametrize("column", ["passenger_id", "age"])
+@pytest.mark.parametrize("value", [-(2**63), 2**63 - 1])
+def test_integer_filters_accept_sqlite_boundaries(column: str, value: int) -> None:
+    validate_query(
+        QueryDataInput(
+            table="passengers",
+            filter=[{"column": column, "op": "eq", "value": value}],
+        )
+    )
+
+
+@pytest.mark.parametrize("column", ["passenger_id", "age"])
+@pytest.mark.parametrize("value", [2**63, -(2**63) - 1, 10**100])
+def test_integer_filters_reject_values_outside_sqlite_range(
+    column: str,
+    value: int,
+) -> None:
+    _expect_invalid(
+        QueryDataInput(
+            table="passengers",
+            filter=[{"column": column, "op": "eq", "value": value}],
+        ),
+        "filter[0].value",
+    )
+
+
 def test_boolean_columns_accept_booleans_and_zero_one() -> None:
     for value in (True, False, 0, 1):
         validate_query(
@@ -308,7 +334,6 @@ def test_compile_query_builds_static_sql_and_ordered_params() -> None:
     compiled = compile_query(request)
 
     assert compiled.columns == ["sex", "passenger_id"]
-    assert compiled.fetch_limit == 6
     assert compiled.params == (30, "female", 6, 10)
     assert 'SELECT "sex", "passenger_id"' in compiled.sql
     assert "FROM (" in compiled.sql
@@ -437,8 +462,7 @@ def test_compile_query_never_embeds_filter_values() -> None:
     assert compiled.params == (value, 2, 0)
 
 
-def test_compile_query_uses_fetch_limit_one_greater_than_limit() -> None:
+def test_compile_query_uses_limit_plus_one_parameter() -> None:
     compiled = compile_query(QueryDataInput(table="passengers", limit=500))
 
-    assert compiled.fetch_limit == 501
     assert compiled.params == (501, 0)
