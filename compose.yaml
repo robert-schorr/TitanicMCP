@@ -1,0 +1,35 @@
+name: titanic-mcp
+
+services:
+  titanic-mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: titanic-mcp:local
+    environment:
+      MCP_PROFILE: container
+      TITANIC_MCP_DB_PATH: /app/data/titanic.db
+      MCP_ALLOWED_HOSTS: localhost:8000,127.0.0.1:8000
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - type: bind
+        source: ./data/titanic.db
+        target: /app/data/titanic.db
+        read_only: true
+    read_only: true
+    tmpfs:
+      - /tmp:noexec,nosuid,size=64m
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=2)
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s

@@ -7,7 +7,9 @@ and remote profiles.
 
 ## Setup
 
-Requires Python 3.13+ and [uv](https://docs.astral.sh/uv/).
+Requires Python 3.13+ and [uv](https://docs.astral.sh/uv/). Container
+deployment additionally requires Docker with Compose v2.24.4 or newer; see
+[Container deployment](#container-deployment).
 
 ```powershell
 uv sync
@@ -118,6 +120,123 @@ uv run titanic-mcp
 The `container` profile binds all interfaces inside the container and permits
 token omission because the deployment must publish the port only on loopback.
 See the exposure warning below.
+
+## Container deployment
+
+The container image packages the same HTTP service. It runs as a non-root user,
+needs no writable root filesystem, and reads the database from a read-only bind
+mount. Docker with Compose v2.24.4 or newer is required, and `data/titanic.db`
+must exist on the host.
+
+> **Container exposure warning:** the default Compose file publishes port 8000
+> only on `127.0.0.1`. Do not change that mapping to expose the service. Use the
+> remote overlay with a strong `MCP_AUTH_TOKEN`, an explicit
+> `MCP_ALLOWED_HOSTS` value, and TLS termination at a reverse proxy before
+> allowing external access.
+
+### Build the image
+
+```powershell
+docker compose build
+```
+
+The multi-stage build uses `python:3.13-slim` and a pinned
+`ghcr.io/astral-sh/uv` image. It installs from `uv.lock` with
+`--frozen --no-dev --no-editable` and copies only the prepared virtual
+environment and application source into the runtime stage. The runtime image
+contains no compiler toolchain, uv cache, project tests or test dependencies,
+database file, or secrets.
+
+### Run the default profile
+
+```powershell
+docker compose up -d
+```
+
+The default profile sets `MCP_PROFILE=container` and
+`MCP_ALLOWED_HOSTS=localhost:8000,127.0.0.1:8000`, binds `0.0.0.0` inside the
+container, and publishes `127.0.0.1:8000` only. It also uses a read-only root
+filesystem, a read-only database mount, `no-new-privileges`, and a 64 MB
+`noexec,nosuid` tmpfs at `/tmp`.
+
+Point the MCP client at `http://127.0.0.1:8000/mcp` using the client
+configuration shown above. No token is required for the default profile
+because the published port is not externally reachable.
+
+### Container healthcheck
+
+The container healthcheck calls `GET /healthz` with the Python standard
+library. It starts after 5 seconds, runs every 5 seconds, and marks the
+container unhealthy after five failed 3-second probes.
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:8000/healthz
+docker compose ps
+docker inspect --format '{{.State.Health.Status}}' (docker compose ps -q titanic-mcp)
+```
+
+`GET /healthz` returns 200 without MCP initialization or authentication.
+`docker compose ps` reports `(healthy)` once the service is accepting requests.
+
+### Run the remote overlay
+
+The remote overlay publishes port 8000 on all interfaces and requires a token
+and an explicit host allowlist. Compose interpolation fails before the
+container starts if either value is missing.
+
+```powershell
+$env:MCP_AUTH_TOKEN = "<long-random-token>"
+$env:MCP_ALLOWED_HOSTS = "mcp.example.com:8000"
+$env:MCP_ALLOWED_ORIGINS = "https://app.example.com"  # optional
+docker compose -f compose.yaml -f compose.remote.yaml up -d
+```
+
+The overlay sets `MCP_PROFILE=remote`, replaces the loopback mapping with
+`8000:8000`, and inherits the read-only filesystem, tmpfs, read-only database
+mount, `no-new-privileges`, restart policy, and healthcheck from
+`compose.yaml`.
+
+MCP clients must send `Authorization: Bearer <long-random-token>`. Requests
+without a valid token receive HTTP 401. Use the public host value in
+`MCP_ALLOWED_HOSTS`; when TLS terminates at a reverse proxy, include the Host
+header that the proxy forwards (without a port for the default HTTPS port).
+Set `MCP_ALLOWED_ORIGINS` only when a browser client calls the service
+cross-origin.
+
+To stop the overlay:
+
+```powershell
+docker compose -f compose.yaml -f compose.remote.yaml down
+```
+
+### Troubleshooting
+
+```powershell
+docker compose config
+docker compose logs --tail=50 titanic-mcp
+docker compose exec titanic-mcp id
+docker compose down
+```
+
+- `MCP_AUTH_TOKEN is required` or `MCP_ALLOWED_HOSTS is required`: export both
+  variables before starting the remote overlay.
+- HTTP 401 from `/mcp`: send the bearer token configured in
+  `MCP_AUTH_TOKEN`. `/healthz` remains unauthenticated.
+- HTTP 421 or 403: add the client's Host or Origin value to
+  `MCP_ALLOWED_HOSTS` or `MCP_ALLOWED_ORIGINS`.
+- The container exits with a configuration error: `MCP_PROFILE=remote` requires
+  both `MCP_AUTH_TOKEN` and `MCP_ALLOWED_HOSTS`.
+- Queries fail because the database is missing: ensure `data/titanic.db`
+  exists; the container mounts it read-only and never copies it into the image.
+- Port 8000 is already in use: stop the local `uv run titanic-mcp` process or
+  the other container using the port, then retry.
+- Source changes are not visible: rebuild with
+  `docker compose up -d --build`.
+- Inspect the resolved profile, mounts, ports, and healthcheck with
+  `docker compose config`.
+
+The image runs as UID/GID 10001 (`titanic`).
+`docker compose exec titanic-mcp id` confirms the runtime identity.
 
 ## Authentication
 

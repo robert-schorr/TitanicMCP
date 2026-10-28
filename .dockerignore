@@ -1,0 +1,45 @@
+# Version control and CI
+.git
+.github
+
+# Virtual environments and caches
+.venv
+venv
+**/.venv
+**/__pycache__
+__pycache__
+*.py[cod]
+.pytest_cache
+.ruff_cache
+.mypy_cache
+.ty_cache
+
+# Tests and planning artifacts
+tests
+openspec
+
+# Local secrets and databases
+.env*
+*.db
+**/*.db
+data/
+
+# Logs, coverage, and build output
+*.log
+logs/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+dist/
+build/
+*.egg-info
+
+# Editor and OS metadata
+.vscode
+.idea
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+desktop.ini

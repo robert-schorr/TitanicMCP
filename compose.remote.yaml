@@ -1,0 +1,9 @@
+services:
+  titanic-mcp:
+    environment:
+      MCP_PROFILE: remote
+      MCP_AUTH_TOKEN: ${MCP_AUTH_TOKEN:?MCP_AUTH_TOKEN is required}
+      MCP_ALLOWED_HOSTS: ${MCP_ALLOWED_HOSTS:?MCP_ALLOWED_HOSTS is required}
+      MCP_ALLOWED_ORIGINS: ${MCP_ALLOWED_ORIGINS:-}
+    ports: !override
+      - "8000:8000"
