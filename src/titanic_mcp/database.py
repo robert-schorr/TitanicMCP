@@ -53,8 +53,8 @@ class Database:
 
         with self.connect() as connection:
             row = connection.execute(
-                f"SELECT COUNT(*) FROM ({source_sql}) AS source"
+                f"SELECT COUNT(*) FROM ({source_sql}) AS source"  # nosec B608 — wraps static catalog SQL; user values are bound params
             ).fetchone()
-        if row is None:
-            raise RuntimeError("COUNT query returned no row")
+        # ``SELECT COUNT(*)`` always returns exactly one row.
+        assert row is not None
         return int(row[0])

@@ -37,7 +37,7 @@ Profile = Literal["local", "container", "remote"]
 LogFormat = Literal["json", "text"]
 
 DEFAULT_HOST = "127.0.0.1"
-DEFAULT_CONTAINER_HOST = "0.0.0.0"
+DEFAULT_CONTAINER_HOST = "0.0.0.0"  # nosec B104 — required for the container profile; gated by MCP_ALLOWED_HOSTS validation
 DEFAULT_PORT = 8000
 DEFAULT_PROFILE: Profile = "local"
 DEFAULT_LOG_LEVEL = "INFO"
@@ -164,6 +164,10 @@ def validate_config(config: ServerConfig) -> ServerConfig:
         if missing:
             raise ConfigurationError(
                 f"MCP_PROFILE=remote requires {' and '.join(missing)}."
+            )
+        if config.auth_token is not None and len(config.auth_token) < 16:
+            raise ConfigurationError(
+                "MCP_PROFILE=remote requires MCP_AUTH_TOKEN of at least 16 characters."
             )
 
     return config
@@ -300,7 +304,11 @@ class _ClassifiedToolError(ToolError):
 
 
 def _safe_tool(function: Any) -> Any:
-    """Convert classified tool errors into middleware-visible exceptions."""
+    """Convert classified tool errors into middleware-visible exceptions.
+
+    This wrapper is synchronous: registered tools must be synchronous functions.
+    Async tools are not supported by this wrapper.
+    """
 
     @wraps(function)
     def wrapper(*args: Any, **kwargs: Any) -> Any:
@@ -441,11 +449,11 @@ def _register_tools(mcp: FastMCP, database: Database) -> None:
     @_safe_tool
     def query_data(
         table: Annotated[StrictStr, Field(min_length=1)],
-        columns: list[StrictStr] | None = None,
-        filter: list[FilterPredicate] | None = None,
+        columns: Annotated[list[StrictStr], Field(max_length=16)] | None = None,
+        filter: Annotated[list[FilterPredicate], Field(max_length=20)] | None = None,
         order_by: OrderBy | None = None,
         limit: Annotated[StrictInt, Field(ge=1, le=500)] = 100,
-        offset: Annotated[StrictInt, Field(ge=0)] = 0,
+        offset: Annotated[StrictInt, Field(ge=0, le=100000)] = 0,
     ) -> dict[str, Any]:
         """Run a bounded, read-only query.
 
@@ -514,7 +522,7 @@ def http_app(
 ) -> Any:
     """Return the Streamable HTTP ASGI application for the selected profile."""
 
-    resolved = validate_config(config or default_config())
+    resolved = config or default_config()
     return create_app(database, resolved).http_app(
         path=MCP_PATH,
         stateless_http=resolved.stateless_http,
@@ -532,17 +540,20 @@ def main() -> None:
     except ConfigurationError as exc:
         raise SystemExit(f"Configuration error: {exc}") from exc
 
-    try:
-        Database(config.database_path).fetch_one("SELECT 1")
-    except (OSError, sqlite3.Error) as exc:
-        raise SystemExit(
-            f"Configuration error: database is not readable: {config.database_path}"
-        ) from exc
-
     configure_logging(
         level=config.log_level,
         json_output=config.log_format == "json",
     )
+
+    try:
+        Database(config.database_path).fetch_one("SELECT 1")
+    except (OSError, sqlite3.Error) as exc:
+        raise SystemExit(
+            f"Configuration error: database is not readable: "
+            f"{config.database_path}; set TITANIC_MCP_DB_PATH to a readable "
+            "Titanic database file."
+        ) from exc
+
     create_app(config=config).run(
         transport="http",
         host=config.host,

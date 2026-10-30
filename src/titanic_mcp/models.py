@@ -83,7 +83,7 @@ class QueryDataInput(_InputModel):
     filter: list[FilterPredicate] | None = None
     order_by: OrderBy | None = None
     limit: StrictInt = Field(default=100, ge=1, le=500)
-    offset: StrictInt = Field(default=0, ge=0)
+    offset: StrictInt = Field(default=0, ge=0, le=100000)
 
     @field_validator("columns")
     @classmethod

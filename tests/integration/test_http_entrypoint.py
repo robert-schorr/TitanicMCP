@@ -162,7 +162,7 @@ def test_main_fails_before_serving_when_database_is_missing(
 def test_main_starts_the_remote_profile(monkeypatch: pytest.MonkeyPatch) -> None:
     _clear_environment(monkeypatch)
     monkeypatch.setenv("MCP_PROFILE", "remote")
-    monkeypatch.setenv("MCP_AUTH_TOKEN", "remote-token")
+    monkeypatch.setenv("MCP_AUTH_TOKEN", "remote-token-5f8e2d6c")
     monkeypatch.setenv("MCP_ALLOWED_HOSTS", "mcp.example.com,localhost:8000")
     monkeypatch.setenv("MCP_ALLOWED_ORIGINS", "https://app.example")
     captured = _capture_run(monkeypatch)

@@ -122,7 +122,7 @@ def test_remote_profile_defaults_to_all_interfaces() -> None:
     config = load_config(
         {
             "MCP_PROFILE": "remote",
-            "MCP_AUTH_TOKEN": "remote-token",
+            "MCP_AUTH_TOKEN": "remote-token-5f8e2d6c",
             "MCP_ALLOWED_HOSTS": "mcp.example.com",
         }
     )
@@ -137,13 +137,13 @@ def test_remote_profile_starts_with_required_settings() -> None:
         {
             "MCP_PROFILE": "remote",
             "TITANIC_MCP_HOST": "0.0.0.0",
-            "MCP_AUTH_TOKEN": "remote-token",
+            "MCP_AUTH_TOKEN": "remote-token-5f8e2d6c",
             "MCP_ALLOWED_HOSTS": "mcp.example.com",
             "MCP_ALLOWED_ORIGINS": "https://mcp.example.com",
         }
     )
 
-    assert config.auth_token == "remote-token"
+    assert config.auth_token == "remote-token-5f8e2d6c"
     assert config.allowed_hosts == ("mcp.example.com",)
     assert config.allowed_origins == ("https://mcp.example.com",)
 
@@ -161,13 +161,36 @@ def test_remote_profile_requires_a_non_empty_token(token: str | None) -> None:
         load_config(environ)
 
 
+def test_remote_profile_rejects_a_short_token() -> None:
+    environ = {
+        "MCP_PROFILE": "remote",
+        "MCP_AUTH_TOKEN": "0123456789abcde",
+        "MCP_ALLOWED_HOSTS": "mcp.example.com",
+    }
+
+    with pytest.raises(ConfigurationError, match="at least 16 characters"):
+        load_config(environ)
+
+
+def test_remote_profile_accepts_a_minimum_length_token() -> None:
+    config = load_config(
+        {
+            "MCP_PROFILE": "remote",
+            "MCP_AUTH_TOKEN": "0123456789abcdef",
+            "MCP_ALLOWED_HOSTS": "mcp.example.com",
+        }
+    )
+
+    assert config.auth_token == "0123456789abcdef"
+
+
 @pytest.mark.parametrize("allowed_hosts", [None, "", "   ", " , , "])
 def test_remote_profile_requires_allowed_hosts(
     allowed_hosts: str | None,
 ) -> None:
     environ = {
         "MCP_PROFILE": "remote",
-        "MCP_AUTH_TOKEN": "remote-token",
+        "MCP_AUTH_TOKEN": "remote-token-5f8e2d6c",
     }
     if allowed_hosts is not None:
         environ["MCP_ALLOWED_HOSTS"] = allowed_hosts
@@ -200,7 +223,7 @@ def test_profile_names_are_case_insensitive() -> None:
         load_config(
             {
                 "MCP_PROFILE": "Remote",
-                "MCP_AUTH_TOKEN": "token",
+                "MCP_AUTH_TOKEN": "token-minimum-length",
                 "MCP_ALLOWED_HOSTS": "h",
             }
         ).profile
@@ -222,7 +245,7 @@ def test_all_environment_overrides_are_applied() -> None:
             "TITANIC_MCP_HOST": "0.0.0.0",
             "TITANIC_MCP_PORT": "9001",
             "MCP_PROFILE": "remote",
-            "MCP_AUTH_TOKEN": "  secret-token  ",
+            "MCP_AUTH_TOKEN": "  secret-token-minimum  ",
             "MCP_ALLOWED_HOSTS": " mcp.example.com , ,localhost:8000, ",
             "MCP_ALLOWED_ORIGINS": " https://app.example.com ,, https://mcp.example.com ",
             "TITANIC_MCP_LOG_LEVEL": "debug",
@@ -234,7 +257,7 @@ def test_all_environment_overrides_are_applied() -> None:
     assert config.host == "0.0.0.0"
     assert config.port == 9001
     assert config.profile == "remote"
-    assert config.auth_token == "secret-token"
+    assert config.auth_token == "secret-token-minimum"
     assert config.allowed_hosts == ("mcp.example.com", "localhost:8000")
     assert config.allowed_origins == (
         "https://app.example.com",

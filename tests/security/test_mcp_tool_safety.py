@@ -183,6 +183,28 @@ async def test_pagination_bounds_are_rejected_with_field_path(
     assert records[0].field_paths == [field_path]
 
 
+async def test_oversized_filter_is_rejected_at_the_tool_boundary(
+    mcp_client: Client,
+    tool_log_records: list[Any],
+) -> None:
+    arguments = {
+        "table": "passengers",
+        "filter": [
+            {"column": "age", "op": "gte", "value": index} for index in range(21)
+        ],
+    }
+
+    result = await mcp_client.call_tool("query_data", arguments, raise_on_error=False)
+
+    assert result.is_error is True
+    assert _error_text(result) == "Invalid arguments: filter"
+    records = _canonical(tool_log_records)
+    assert len(records) == 1
+    assert records[0].status == "invalid_arguments"
+    assert records[0].error_type == "validation_error"
+    assert records[0].field_paths == ["filter"]
+
+
 async def test_canonical_log_excludes_filter_values_and_raw_arguments(
     mcp_client: Client,
     tool_log_records: list[Any],
