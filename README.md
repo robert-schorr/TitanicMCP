@@ -20,7 +20,8 @@ Run `uv run pytest --cov=titanic_mcp` to include coverage.
 
 The server reads `data/titanic.db` in read-only mode. No tool writes to the
 database, and every query is bounded. The database is opened at startup; the
-server exits with a clear error if it is missing or unreadable.
+server exits with a clear error if it is missing, unreadable, or does not contain
+the Titanic catalog.
 
 ## Run the server
 
@@ -89,8 +90,12 @@ is installed non-editable, set `TITANIC_MCP_DB_PATH` explicitly.
 | Profile | Default bind | Authentication | Sessions | Host/origin protection |
 |---|---|---|---|---|
 | `local` | `127.0.0.1:8000` | None | Stateless | Automatic loopback protection |
-| `container` | `0.0.0.0:8000` | Optional | Stateful | Strict; `MCP_ALLOWED_HOSTS` required |
-| `remote` | `0.0.0.0:8000` | Required | Stateful | Strict; token and `MCP_ALLOWED_HOSTS` required |
+| `container` | `0.0.0.0:8000` | Optional | Stateless | Strict; `MCP_ALLOWED_HOSTS` required |
+| `remote` | `0.0.0.0:8000` | Required | Stateless | Strict; token and `MCP_ALLOWED_HOSTS` required |
+
+All profiles are stateless, so no session affinity is required and the service can
+run behind a round-robin load balancer. Server-initiated session features are not
+available.
 
 Startup validation fails before the app accepts requests when settings are
 contradictory:
@@ -138,7 +143,8 @@ must exist on the host.
 > only on `127.0.0.1`. Do not change that mapping to expose the service. Use the
 > remote overlay with a strong `MCP_AUTH_TOKEN`, an explicit
 > `MCP_ALLOWED_HOSTS` value, and TLS termination at a reverse proxy before
-> allowing external access.
+> allowing external access. The image itself does not enforce the loopback
+> binding; that protection comes from the Compose port mapping.
 
 ### Build the image
 
@@ -190,7 +196,7 @@ docker inspect --format '{{.State.Health.Status}}' (docker compose ps -q titanic
 With Docker running:
 
 ```powershell
-uv run python scripts/test_container.py
+uv run python scripts/container_smoke_test.py
 ```
 
 The script builds `titanic-mcp:container-test`, starts it with the Compose
@@ -379,10 +385,10 @@ Query rules:
 | `filter[].value` | Must match the column type. `is_null` and `not_null` take no value; `in` takes 1–100 values. |
 | `order_by` | Optional single column and `asc`/`desc`. A stable ID tiebreaker is added automatically. |
 | `limit` | Optional integer from 1 to 500; default `100`. |
-| `offset` | Optional integer greater than or equal to `0`; default `0`. |
+| `offset` | Optional integer from `0` to `100000`; default `0`. |
 
-Use exact JSON types: `"10"` is not a valid `limit`, and `1` is not a valid
-boolean filter value.
+Use exact JSON types: `"10"` is not a valid `limit`. Boolean columns accept the
+JSON booleans `true`/`false` and the integers `0`/`1`.
 
 ## Safe error contract
 
@@ -393,7 +399,6 @@ details:
 |---|---|
 | Pydantic argument validation | `Invalid arguments: <sorted field paths>` |
 | Query-core validation | `Invalid arguments: <sorted field paths>` |
-| Explicitly safe tool error | The safe message |
 | Anything unexpected | `Internal error.` |
 
 Field paths use dotted names and bracket indices:
@@ -428,13 +433,17 @@ The server writes one canonical JSON `tool_call` record per call to stderr:
 }
 ```
 
-`status` is one of `ok`, `invalid_arguments`, `safe_error`, or
-`internal_error`. `error_type` is one of `none`, `validation_error`,
-`domain_validation`, `safe_tool_error`, or `unexpected_exception`.
+`status` is one of `ok`, `invalid_arguments`, or `internal_error`. `error_type` is
+one of `none`, `validation_error`, `domain_validation`, or
+`unexpected_exception`.
 
 Internal diagnostics (validation error types/locations and unexpected exception
 tracebacks) are logged separately. The canonical record never contains filter
 values, raw arguments, authorization headers, SQL, or parameter values.
+
+Uvicorn's own startup and access logs still use plain text rather than the
+application's JSON formatter. Routing them through the JSON formatter is a
+possible TODO; until then, log ingestion must handle both formats.
 
 ## Development quality gates
 
@@ -444,3 +453,8 @@ uv run ruff check .
 uv run ruff format --check .
 uv run ty check
 ```
+
+## Next steps
+
+Deferred work and hardening options are tracked in
+[`docs/next-steps.md`](docs/next-steps.md).

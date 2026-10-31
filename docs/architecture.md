@@ -142,8 +142,8 @@ load_config(environ) ──> parse profile, host, port, database path, token,
 validate_config(config) ──> reject contradictory security combinations
    │
    ▼
-Database(...).fetch_one("SELECT 1") ──> configuration error if unreadable
-   │
+Database(...).fetch_one("SELECT COUNT(*) FROM Observation")
+   │                      └─> configuration error if unreadable or catalog missing
    ▼
 configure_logging(...)  ──> stderr handler, JSON or text
    │
@@ -351,10 +351,10 @@ is fixed in one place and covered by domain tests that do not need a server.
 
 ### 5.7 The safe-error pipeline exists because FastMCP masks errors
 
-**Decision.** `_safe_tool` catches `QueryValidationError` and `SafeToolError` and
-re-raises them as `_ClassifiedToolError`, a `ToolError` subclass carrying `status`,
-`error_type`, and `field_paths`. `ToolCallMiddleware` maps that classification to the
-client message and log record.
+**Decision.** `_safe_tool` catches `QueryValidationError` and re-raises it as
+`_ClassifiedToolError`, a `ToolError` subclass carrying `status`, `error_type`,
+and `field_paths`. `ToolCallMiddleware` maps that classification to the client
+message and log record.
 
 **Why this indirection is necessary.** FastMCP is configured with
 `mask_error_details=True`. It replaces non-`ToolError` exceptions with a generic
@@ -393,7 +393,7 @@ handlers and filter only its duplicate raw validation warning.
   keeping protocol output and diagnostics separate is a useful invariant and keeps
   the logging contract compatible with a future stdio mode.
 - A single record in `finally` guarantees that successes, validation failures,
-  safe errors, and unexpected exceptions all produce exactly one audit event with a
+  and unexpected exceptions all produce exactly one audit event with a
   duration and status. Logging at the call sites would produce gaps and duplicates.
 - The canonical record contains only metadata: tool name, request/correlation IDs,
   duration, status, error type, table name, filter **count**, and field paths. It
@@ -407,6 +407,10 @@ handlers and filter only its duplicate raw validation warning.
 **Why JSON by default.** The service is meant to run in a container and be scraped or
 grepped by machines. Text logs remain available for local debugging via
 `TITANIC_MCP_LOG_FORMAT=text`.
+
+**Possible TODO.** Uvicorn's own startup and access logs remain plain text. Routing
+them through the JSON formatter would give stderr a single format; until then, log
+ingestion must handle both.
 
 ### 5.9 Configuration is immutable, parsed at the edge, and revalidated at the app seam
 
@@ -439,8 +443,8 @@ to be reached and what must be true before it starts.
 | Profile | Bind default | Auth | Allowed hosts | Stateless HTTP | Host/origin |
 |---|---|---|---|---|---|
 | `local` | `127.0.0.1` | none by default; a token is honored if set | optional (empty by default) | `True` | `"auto"` |
-| `container` | `0.0.0.0` | none by default; a token is honored if set | **required** | `False` (sessions available) | `True` |
-| `remote` | `0.0.0.0` | **required** | **required** | `False` (sessions available) | `True` |
+| `container` | `0.0.0.0` | none by default; a token is honored if set | **required** | `True` | `True` |
+| `remote` | `0.0.0.0` | **required** | **required** | `True` | `True` |
 
 Startup rejects:
 
@@ -455,10 +459,9 @@ deployment publishes the port to loopback. The container change pins
 to `remote`; the application cannot tell the difference from inside the container.
 This is the most important operational trade-off in the current design.
 
-`local` is stateless to avoid session affinity for the common development case.
-`container` and `remote` leave FastMCP's session support enabled for clients that use
-server-initiated session features. That split is deliberate: a stateless container
-deployment would be a configuration change with its own tests, not a silent default.
+All three profiles are stateless. The tools are request/response only, so there is
+no session state to keep and no need for sticky sessions when running multiple
+replicas. Server-initiated session features are unavailable.
 
 ### 5.11 Health is a shallow, unauthenticated probe
 
@@ -471,8 +474,9 @@ does not initialize an MCP session. Making it depend on the database or a sessio
 would make the probe slow, stateful, and likely to flap.
 
 **Cost and caveat.** `/healthz` means "the HTTP app is accepting requests." `main()`
-checks that the configured database is readable before serving, so a server that
-started has already passed that check; the probe does not re-check the database. The
+checks that the configured database is readable and contains the expected catalog
+before serving, so a server that started has already passed that check; the probe
+does not re-check the database. The
 host/origin guard still wraps the whole app, so a probe must send an allowed `Host`
 header (the intended container allowlist includes `127.0.0.1:8000` and
 `localhost:8000`). If ongoing database readiness matters, add a separate check with a
@@ -495,7 +499,6 @@ Every tool failure passes through `ToolCallMiddleware`:
 |---|---|---|---|
 | FastMCP / Pydantic validation | `Invalid arguments: <sorted paths>` | `invalid_arguments` | `validation_error` |
 | Core semantic validation | `Invalid arguments: <sorted paths>` | `invalid_arguments` | `domain_validation` |
-| Explicit `SafeToolError` | The safe message | `safe_error` | `safe_tool_error` |
 | Anything unexpected | `Internal error.` | `internal_error` | `unexpected_exception` |
 | Success | Tool result | `ok` | `none` |
 
@@ -622,7 +625,7 @@ profile trusts the deployment to do that; the `remote` profile does not.
 | HTTP profiles | `tests/integration/test_profiles.py` | Local/container/remote validation, missing token/hosts, allowlist parsing, port/log validation, token redaction |
 | HTTP transport | `tests/integration/test_http_app.py` | `/mcp` initialize/list/call, stateless requests, `/healthz`, Host/Origin rejection, 401 paths, unchanged schemas and safe errors |
 | HTTP entrypoint | `tests/integration/test_http_entrypoint.py` | Real `titanic-mcp` subprocess, environment wiring, remote profile startup, token never logged |
-| Manual verification | `scripts/smoke_test.py`, `scripts/manual_test_database.py`, `scripts/test_container.py` | In-process/HTTP tool smoke, database layer and read-only checks, container image smoke |
+| Manual verification | `scripts/mcp_server_smoke_test.py`, `scripts/database_logic_manual_test.py`, `scripts/container_smoke_test.py` | In-process/HTTP tool smoke, database layer and read-only checks, container image smoke |
 
 The former `tests/integration/test_stdio_entrypoint.py` was removed with the
 transport switch; `test_http_entrypoint.py` now covers the real `titanic-mcp`
@@ -637,7 +640,7 @@ Implemented:
 - Safe-error adapter and middleware.
 - Structured logging and correlation.
 - `local`/`container`/`remote` profiles and fail-closed startup checks.
-- Startup database readability check and `GET /healthz`.
+- Startup database and catalog check and `GET /healthz`.
 - Optional `StaticTokenVerifier` and Host/Origin protection.
 - Hardened container image and Compose profiles.
 - Domain, security, integration, HTTP, and entrypoint tests.
@@ -646,10 +649,10 @@ Implemented:
 changes, use `git log`; for decision history and capability specs, see
 `openspec/specs/` and `openspec/changes/archive/`.
 
-Manual verification scripts live in `scripts/`: `smoke_test.py` covers the
-in-process or running HTTP server, `manual_test_database.py` covers the database
-layer, and `test_container.py` covers the container image. None are part of the
-pytest suite.
+Manual verification scripts live in `scripts/`: `mcp_server_smoke_test.py` covers
+the in-process or running HTTP server, `database_logic_manual_test.py` covers the
+database layer, and `container_smoke_test.py` covers the container image. None are
+part of the pytest suite.
 
 ## 12. How to change the system safely
 

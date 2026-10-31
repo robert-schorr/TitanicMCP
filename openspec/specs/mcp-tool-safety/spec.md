@@ -56,17 +56,12 @@ Validation failures SHALL return a tool error whose message is exactly `Invalid 
 
 ### Requirement: Safe domain and internal errors
 
-Only errors explicitly classified as client-safe SHALL be exposed to clients. All other exceptions SHALL return the message `Internal error.`
+Validation failures SHALL use the safe argument format. All unexpected exceptions SHALL return the message `Internal error.` Client responses MUST NOT expose exception detail beyond those messages.
 
 #### Scenario: Unexpected exception is masked
 
 - **WHEN** a tool encounters an unexpected database or runtime exception
 - **THEN** the client receives `Internal error.` with an error result
-
-#### Scenario: Classified safe error passes through
-
-- **WHEN** a tool raises an error explicitly classified as client-safe
-- **THEN** its safe message is returned unchanged
 
 ### Requirement: Internal diagnostics
 
@@ -86,7 +81,7 @@ The server SHALL log full internal validation and exception detail, including Py
 
 ### Requirement: Structured tool-call logs
 
-Every tool call SHALL emit exactly one JSON log record with `event` set to `tool_call`, `tool_name`, `duration_ms`, `status`, and `error_type`. `status` SHALL be one of `ok`, `invalid_arguments`, `safe_error`, or `internal_error`; `error_type` SHALL be one of `none`, `validation_error`, `domain_validation`, `safe_tool_error`, or `unexpected_exception`.
+Every tool call SHALL emit exactly one JSON log record with `event` set to `tool_call`, `tool_name`, `duration_ms`, `status`, and `error_type`. `status` SHALL be one of `ok`, `invalid_arguments`, or `internal_error`; `error_type` SHALL be one of `none`, `validation_error`, `domain_validation`, or `unexpected_exception`.
 
 #### Scenario: Successful call log
 
@@ -130,4 +125,4 @@ Tool-call logs MUST NOT contain filter values, SQL text, SQL parameters, request
 
 - **WHEN** a query includes a filter value or an HTTP request includes an authentication token
 - **THEN** the serialized tool-call log contains neither the filter value nor the token
-- **AND** it may contain the table name, filter count, and field paths
+- **AND** it may contain a catalog table name, filter count, and field paths

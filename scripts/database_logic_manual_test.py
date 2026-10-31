@@ -2,7 +2,7 @@
 
 Run from the repository root with:
 
-    uv run python scripts/manual_test_database.py
+    uv run python scripts/database_logic_manual_test.py
 
 The script exercises ``Database`` against the real SQLite file at
 ``data/titanic.db`` and prints one PASS/FAIL line per check, followed by a

@@ -47,8 +47,8 @@ The catalog has nine entries: the `passengers` view (recommended) plus eight raw
 | Profile | Bind | Client endpoint | Auth | Required allowlist | HTTP sessions |
 |---|---|---|---|---|---|
 | `local` | `127.0.0.1:8000` | `http://127.0.0.1:8000/mcp` | None by default; a token is honored if set | Optional | Stateless |
-| `container` | `0.0.0.0:8000` inside the container, published as `127.0.0.1:8000` | `http://127.0.0.1:8000/mcp` | None by default; a token is honored if set | `MCP_ALLOWED_HOSTS` | Stateful |
-| `remote` | `0.0.0.0:8000` behind a TLS-terminating proxy | `https://mcp.example.com/mcp` | `MCP_AUTH_TOKEN` required (16+ characters) | `MCP_ALLOWED_HOSTS` | Stateful |
+| `container` | `0.0.0.0:8000` inside the container, published as `127.0.0.1:8000` | `http://127.0.0.1:8000/mcp` | None by default; a token is honored if set | `MCP_ALLOWED_HOSTS` | Stateless |
+| `remote` | `0.0.0.0:8000` behind a TLS-terminating proxy | `https://mcp.example.com/mcp` | `MCP_AUTH_TOKEN` required (16+ characters) | `MCP_ALLOWED_HOSTS` | Stateless |
 
 Profile rules enforced at startup:
 
@@ -126,7 +126,7 @@ stable `passenger_id` tiebreaker, and ends with `LIMIT ? OFFSET ?`.
 6. **Boundary → HTTP app.** The client message is normalized to
    `Invalid arguments: columns[0]`.
 7. **HTTP app → client.** The error is a tool result (`isError: true`), not a transport
-   crash, so the session stays usable.
+   crash, so the client can continue calling tools.
 
 Unexpected exceptions become `Internal error.`; both paths keep implementation details
 out of the client response.
@@ -135,7 +135,8 @@ out of the client response.
 
 1. **Entrypoint → SQLite.** `load_config()` parses the environment, `validate_config()`
    rejects contradictory profiles, and the entrypoint opens the database once with
-   `SELECT 1`. A missing or unreadable file exits before serving.
+   `SELECT COUNT(*) FROM Observation`. A missing, unreadable, or catalog-less file exits
+   before serving.
 2. **Entrypoint → HTTP app.** `create_app()` registers the three tools, the middleware, and
    `/healthz`; `run()` binds the configured host and port. `create_app()` itself does not
    open the database.
@@ -156,8 +157,8 @@ out of the client response.
   connection per operation, and no write API.
 - One canonical `event="tool_call"` record per call; no raw arguments, filter values, SQL,
   parameters, request bodies, auth headers, or tokens.
-- Safe client messages are limited to `Invalid arguments: <sorted paths>`, an explicit
-  `SafeToolError` message, and `Internal error.`.
+- Safe client messages are limited to `Invalid arguments: <sorted paths>` and
+  `Internal error.`.
 - `/healthz` is shallow, unauthenticated, and independent of MCP initialization.
 - Profiles fail closed before the port is bound.
 

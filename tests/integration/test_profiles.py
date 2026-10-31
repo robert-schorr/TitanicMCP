@@ -30,7 +30,6 @@ def test_default_config_is_safe_and_local() -> None:
     assert config.allowed_origins == ()
     assert config.log_level == "INFO"
     assert config.log_format == "json"
-    assert config.stateless_http is True
     assert config.host_origin_protection == "auto"
 
 
@@ -54,7 +53,6 @@ def test_local_profile_accepts_loopback_bind_hosts(host: str) -> None:
     config = load_config({"MCP_PROFILE": "local", "TITANIC_MCP_HOST": host})
 
     assert config.profile == "local"
-    assert config.stateless_http is True
 
 
 @pytest.mark.parametrize(
@@ -77,7 +75,6 @@ def test_container_profile_defaults_to_all_interfaces() -> None:
     )
 
     assert config.host == "0.0.0.0"
-    assert config.stateless_http is False
     assert config.host_origin_protection is True
 
 
@@ -128,7 +125,6 @@ def test_remote_profile_defaults_to_all_interfaces() -> None:
     )
 
     assert config.host == "0.0.0.0"
-    assert config.stateless_http is False
     assert config.host_origin_protection is True
 
 

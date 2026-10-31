@@ -8,7 +8,7 @@ from fastmcp import Client, FastMCP
 from mcp_types import TextContent
 
 from titanic_mcp import queries
-from titanic_mcp.errors import InvalidArgumentsError, SafeToolError
+from titanic_mcp.errors import InvalidArgumentsError
 from titanic_mcp.server import ToolCallMiddleware, _safe_tool
 
 
@@ -55,26 +55,20 @@ async def test_unexpected_exception_is_masked(
     assert internal[0].exception_type == "RuntimeError"
 
 
-async def test_classified_safe_error_passes_through(
+async def test_canonical_log_only_records_catalog_tables(
     mcp_client: Client,
     tool_log_records: list[Any],
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def fail(_database: Any, _table: str) -> None:
-        raise SafeToolError("The catalog is temporarily unavailable.")
+    unknown_table = "X" * 100_000
 
-    monkeypatch.setattr(queries, "describe_table", fail)
-
-    result = await mcp_client.call_tool(
-        "describe_table", {"table": "passengers"}, raise_on_error=False
+    await mcp_client.call_tool(
+        "query_data", {"table": unknown_table}, raise_on_error=False
     )
 
-    assert result.is_error is True
-    assert _error_text(result) == "The catalog is temporarily unavailable."
     records = _canonical(tool_log_records)
     assert len(records) == 1
-    assert records[0].status == "safe_error"
-    assert records[0].error_type == "safe_tool_error"
+    assert records[0].table is None
+    assert unknown_table not in json.dumps(records[0].__dict__, default=str)
 
 
 async def test_domain_validation_maps_to_safe_arguments(
@@ -106,7 +100,7 @@ async def test_root_level_validation_falls_back_to_request(
     @app.tool
     @_safe_tool
     def root_failure() -> str:
-        raise InvalidArgumentsError([], "unlocatable failure")
+        raise InvalidArgumentsError([])
 
     async with Client(app) as client:
         result = await client.call_tool("root_failure", {}, raise_on_error=False)

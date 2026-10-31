@@ -380,7 +380,7 @@ def get_table_spec(table_name: str) -> TableSpec:
     try:
         return TABLES[table_name]
     except KeyError:
-        raise QueryValidationError("table", f"Unknown table: {table_name!r}") from None
+        raise QueryValidationError("table") from None
 
 
 def list_tables(database: SupportsCount) -> list[TableSummary]:
@@ -426,21 +426,15 @@ def validate_query(request: QueryDataInput) -> TableSpec:
     spec = get_table_spec(request.table)
 
     if request.filter is not None and len(request.filter) > 20:
-        raise QueryValidationError("filter", "At most 20 predicates are allowed.")
+        raise QueryValidationError("filter")
 
     if request.columns is not None:
         for index, column_name in enumerate(request.columns):
             if column_name not in spec.column_map:
-                raise QueryValidationError(
-                    f"columns[{index}]",
-                    f"Unknown column {column_name!r} for table {spec.name!r}.",
-                )
+                raise QueryValidationError(f"columns[{index}]")
 
     if request.order_by is not None and request.order_by.column not in spec.column_map:
-        raise QueryValidationError(
-            "order_by.column",
-            f"Unknown column {request.order_by.column!r} for table {spec.name!r}.",
-        )
+        raise QueryValidationError("order_by.column")
 
     for index, predicate in enumerate(request.filter or ()):
         _validate_predicate(spec, index, predicate)
@@ -455,23 +449,14 @@ def _validate_predicate(
 ) -> None:
     column = spec.column_map.get(predicate.column)
     if column is None:
-        raise QueryValidationError(
-            f"filter[{index}].column",
-            f"Unknown column {predicate.column!r} for table {spec.name!r}.",
-        )
+        raise QueryValidationError(f"filter[{index}].column")
 
     if predicate.op not in column.allowed_operators:
-        raise QueryValidationError(
-            f"filter[{index}].op",
-            f"Operator {predicate.op.value!r} is not allowed for column {column.name!r}.",
-        )
+        raise QueryValidationError(f"filter[{index}].op")
 
     if predicate.op in {FilterOperator.is_null, FilterOperator.not_null}:
         if predicate.value is not None:
-            raise QueryValidationError(
-                f"filter[{index}].value",
-                f"Operator {predicate.op.value!r} does not take a value.",
-            )
+            raise QueryValidationError(f"filter[{index}].value")
         return
 
     if predicate.op is FilterOperator.in_:
@@ -483,47 +468,24 @@ def _validate_predicate(
 
 def _validate_in_value(index: int, column: ColumnSpec, value: object) -> None:
     if not isinstance(value, list):
-        raise QueryValidationError(
-            f"filter[{index}].value",
-            "Operator 'in' requires a list of values.",
-        )
+        raise QueryValidationError(f"filter[{index}].value")
     if not 1 <= len(value) <= 100:
-        raise QueryValidationError(
-            f"filter[{index}].value",
-            "Operator 'in' requires between 1 and 100 values.",
-        )
+        raise QueryValidationError(f"filter[{index}].value")
 
     for value_index, item in enumerate(value):
         if item is None:
-            raise QueryValidationError(
-                f"filter[{index}].value[{value_index}]",
-                "Null is not allowed in 'in' values.",
-            )
+            raise QueryValidationError(f"filter[{index}].value[{value_index}]")
         if not _value_matches(column.type, item):
-            raise QueryValidationError(
-                f"filter[{index}].value[{value_index}]",
-                f"Value {item!r} does not match column {column.name!r} "
-                f"type {column.type.value!r}.",
-            )
+            raise QueryValidationError(f"filter[{index}].value[{value_index}]")
 
 
 def _validate_scalar_value(index: int, column: ColumnSpec, value: object) -> None:
     if value is None:
-        raise QueryValidationError(
-            f"filter[{index}].value",
-            "A value is required for this operator.",
-        )
+        raise QueryValidationError(f"filter[{index}].value")
     if isinstance(value, list):
-        raise QueryValidationError(
-            f"filter[{index}].value",
-            "A scalar value is required for this operator.",
-        )
+        raise QueryValidationError(f"filter[{index}].value")
     if not _value_matches(column.type, value):
-        raise QueryValidationError(
-            f"filter[{index}].value",
-            f"Value {value!r} does not match column {column.name!r} "
-            f"type {column.type.value!r}.",
-        )
+        raise QueryValidationError(f"filter[{index}].value")
 
 
 def _value_matches(column_type: ColumnType, value: object) -> bool:

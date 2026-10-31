@@ -28,4 +28,4 @@
 ## Workflow follow-up
 
 - Archive the change with `openspec archive add-service-metrics` after implementation, tests, and the delta-spec sync are complete.
-- `scripts/test_container.py` stays untouched here; a container-side `/metrics` scrape belongs to `add-github-actions-ci`.
+- `scripts/container_smoke_test.py` stays untouched here; a container-side `/metrics` scrape belongs to `add-github-actions-ci`.

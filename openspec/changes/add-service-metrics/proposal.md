@@ -30,4 +30,4 @@ None. `mcp-http-service` already requires bearer authentication and host/origin 
 - Adds `tests/integration/test_metrics.py` and updates the bare `ToolCallMiddleware()` construction in `tests/security/test_mcp_tool_safety.py`.
 - Documents the endpoint in `README.md` and `docs/architecture.md`, including the scrape-authorization and allowed-host requirements.
 - Does not change tool behavior, tool schemas, log records, the database, profiles, or configuration surface.
-- Leaves `scripts/test_container.py` untouched; that file belongs to the unimplemented `add-github-actions-ci` change.
+- Leaves `scripts/container_smoke_test.py` untouched; that file belongs to the unimplemented `add-github-actions-ci` change.

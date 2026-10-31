@@ -2,10 +2,10 @@
 
 In-process by default; pass --http to test a running Streamable HTTP server.
 
-    uv run python scripts/smoke_test.py
+    uv run python scripts/mcp_server_smoke_test.py
     uv run titanic-mcp
-    uv run python scripts/smoke_test.py --http
-    uv run python scripts/smoke_test.py --http http://127.0.0.1:8000/mcp
+    uv run python scripts/mcp_server_smoke_test.py --http
+    uv run python scripts/mcp_server_smoke_test.py --http http://127.0.0.1:8000/mcp
 """
 
 from __future__ import annotations

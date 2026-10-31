@@ -25,7 +25,7 @@ from starlette.responses import JSONResponse
 
 from . import queries
 from .database import Database
-from .errors import InvalidArgumentsError, QueryValidationError, SafeToolError
+from .errors import InvalidArgumentsError, QueryValidationError
 from .logging_config import configure_logging
 from .models import FilterPredicate, OrderBy, QueryDataInput
 
@@ -63,12 +63,6 @@ class ServerConfig:
     allowed_origins: tuple[str, ...] = ()
     log_level: str = DEFAULT_LOG_LEVEL
     log_format: LogFormat = DEFAULT_LOG_FORMAT
-
-    @property
-    def stateless_http(self) -> bool:
-        """Stateless requests are the local default; sessions remain opt-in."""
-
-        return self.profile == "local"
 
     @property
     def host_origin_protection(self) -> HostOriginProtection:
@@ -276,7 +270,7 @@ def _root_cause(error: BaseException) -> BaseException:
 
 def _tool_metadata(arguments: dict[str, Any]) -> tuple[str | None, int]:
     table = arguments.get("table")
-    table_name = table if isinstance(table, str) else None
+    table_name = table if isinstance(table, str) and table in queries.TABLES else None
     filters = arguments.get("filter")
     filter_count = len(filters) if isinstance(filters, list) else 0
     return table_name, filter_count
@@ -320,12 +314,6 @@ def _safe_tool(function: Any) -> Any:
                 status="invalid_arguments",
                 error_type="domain_validation",
                 field_paths=exc.field_paths,
-            ) from exc
-        except SafeToolError as exc:
-            raise _ClassifiedToolError(
-                str(exc),
-                status="safe_error",
-                error_type="safe_tool_error",
             ) from exc
 
     return wrapper
@@ -525,7 +513,7 @@ def http_app(
     resolved = config or default_config()
     return create_app(database, resolved).http_app(
         path=MCP_PATH,
-        stateless_http=resolved.stateless_http,
+        stateless_http=True,
         host_origin_protection=resolved.host_origin_protection,
         allowed_hosts=list(resolved.allowed_hosts) or None,
         allowed_origins=list(resolved.allowed_origins) or None,
@@ -546,12 +534,12 @@ def main() -> None:
     )
 
     try:
-        Database(config.database_path).fetch_one("SELECT 1")
+        Database(config.database_path).fetch_one("SELECT COUNT(*) FROM Observation")
     except (OSError, sqlite3.Error) as exc:
         raise SystemExit(
-            f"Configuration error: database is not readable: "
-            f"{config.database_path}; set TITANIC_MCP_DB_PATH to a readable "
-            "Titanic database file."
+            f"Configuration error: database is not readable or is missing the "
+            f"Titanic catalog: {config.database_path}; set TITANIC_MCP_DB_PATH "
+            "to a readable Titanic database file."
         ) from exc
 
     create_app(config=config).run(
@@ -559,7 +547,7 @@ def main() -> None:
         host=config.host,
         port=config.port,
         path=MCP_PATH,
-        stateless_http=config.stateless_http,
+        stateless_http=True,
         host_origin_protection=config.host_origin_protection,
         allowed_hosts=list(config.allowed_hosts) or None,
         allowed_origins=list(config.allowed_origins) or None,

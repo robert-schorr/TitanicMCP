@@ -182,7 +182,7 @@ def test_get_table_spec_rejects_unknown_tables() -> None:
         get_table_spec("sqlite_master")
 
     assert exc_info.value.field_paths == ("table",)
-    assert "sqlite_master" in exc_info.value.detail
+    assert "sqlite_master" not in str(exc_info.value)
 
 
 def test_list_tables_returns_nine_entries_with_counts(database: Database) -> None:
@@ -239,4 +239,4 @@ def test_describe_table_rejects_unknown_tables(database: Database) -> None:
         describe_table(database, "not_a_table")
 
     assert exc_info.value.field_paths == ("table",)
-    assert "not_a_table" in exc_info.value.detail
+    assert "not_a_table" not in str(exc_info.value)

@@ -2,9 +2,9 @@
 
 ## 1. Baseline and prerequisites
 
-- [ ] 1.1 Confirm `scripts/test_container.py` and `data/titanic.db` are tracked; verify with `git ls-files scripts/test_container.py data/titanic.db`.
+- [ ] 1.1 Confirm `scripts/container_smoke_test.py` and `data/titanic.db` are tracked; verify with `git ls-files scripts/container_smoke_test.py data/titanic.db`.
 - [ ] 1.2 Run the four documented gates locally (`uv run pytest`, `uv run ruff check .`, `uv run ruff format --check .`, `uv run ty check`) and verify all pass.
-- [ ] 1.3 Run `uv run python scripts/test_container.py` with Docker and verify it builds, becomes healthy, serves `list_tables`, and reports UID 10001.
+- [ ] 1.3 Run `uv run python scripts/container_smoke_test.py` with Docker and verify it builds, becomes healthy, serves `list_tables`, and reports UID 10001.
 
 ## 2. Workflow skeleton and quality job
 
@@ -20,7 +20,7 @@
 
 ## 4. Container job
 
-- [ ] 4.1 Add the `container` job with `DOCKER_BUILDKIT=1`, `uv sync --locked`, and `uv run --no-sync python scripts/test_container.py`; verify the job invokes the script and sets the builder env.
+- [ ] 4.1 Add the `container` job with `DOCKER_BUILDKIT=1`, `uv sync --locked`, and `uv run --no-sync python scripts/container_smoke_test.py`; verify the job invokes the script and sets the builder env.
 - [ ] 4.2 Add a job timeout to the container job; verify the YAML bounds the build and smoke test.
 
 ## 5. First-run verification

@@ -1501,7 +1501,7 @@ arguments: {
         from:"transport", to:"client", color:"--c-user",
         title:"Tool error response",
         route:"isError: true",
-        desc:"The error is a tool result, not a transport crash. The MCP session stays usable; unexpected exceptions would become <code>Internal error.</code> instead.",
+        desc:"The error is a tool result, not a transport crash. The client can continue calling tools; unexpected exceptions would become <code>Internal error.</code> instead.",
         payload:
 `{
   "jsonrpc": "2.0",
@@ -1513,7 +1513,7 @@ arguments: {
     "isError": true
   }
 }`,
-        chips:["safe message","session alive"]
+        chips:["safe message","connection alive"]
       }
     ]
   },
@@ -1525,9 +1525,9 @@ arguments: {
     steps: [
       {
         from:"boot", to:"db", color:"--c-vector",
-        title:"Validate config, prove the DB is readable",
-        route:"SELECT 1",
-        desc:"<code>load_config()</code> parses the environment and <code>validate_config()</code> rejects contradictory profiles before the port is bound. Then the entrypoint opens the database once with <code>SELECT 1</code> and exits if it is missing or unreadable.",
+        title:"Validate config, prove the DB has the catalog",
+        route:"SELECT COUNT(*) FROM Observation",
+        desc:"<code>load_config()</code> parses the environment and <code>validate_config()</code> rejects contradictory profiles before the port is bound. Then the entrypoint opens the database once with <code>SELECT COUNT(*) FROM Observation</code> and exits if it is missing, unreadable, or catalog-less.",
         payloadLocal:
 `MCP_PROFILE=local
 TITANIC_MCP_HOST=127.0.0.1
@@ -1581,7 +1581,7 @@ Host: 127.0.0.1:8000`,
         from:"transport", to:"probe", color:"--c-ext",
         title:"Liveness confirmed",
         route:"200 OK",
-        desc:"The container healthcheck runs every 5 seconds and marks the service unhealthy after five failed 3-second probes. A started server has already passed the startup database check.",
+        desc:"The container healthcheck runs every 5 seconds and marks the service unhealthy after five failed 3-second probes. A started server has already passed the startup catalog check.",
         payload:
 `{ "status": "ok" }`,
         chips:["200 OK","~0ms"]

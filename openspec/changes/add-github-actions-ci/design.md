@@ -4,7 +4,7 @@
 
 The repository has no `.github/` directory. Its four documented gates (`ruff check`, `ruff format --check`, `ty check`, and `pytest`) pass locally, and the suite currently contains 291 tests: 189 under `tests/domain` and `tests/security`, and 102 under `tests/integration`. Only `tests/integration/test_http_entrypoint.py` starts a real server process.
 
-`scripts/test_container.py` already builds the production image, starts it with the Compose security settings, waits for `/healthz`, calls `list_tables` through the published port, and verifies the runtime UID is 10001. It is currently untracked. See `proposal.md` for why this change is needed.
+`scripts/container_smoke_test.py` already builds the production image, starts it with the Compose security settings, waits for `/healthz`, calls `list_tables` through the published port, and verifies the runtime UID is 10001. It is tracked. See `proposal.md` for why this change is needed.
 
 ## Goals / Non-Goals
 
@@ -36,9 +36,9 @@ The unit check runs `pytest tests/domain tests/security`; the integration check 
 
 The alternative is a `unit`/`integration` marker split, which labels each test more precisely but touches the test suite and adds marker bookkeeping for no behavioral gain here.
 
-### Reuse `scripts/test_container.py`
+### Reuse `scripts/container_smoke_test.py`
 
-The container job runs `uv run --no-sync python scripts/test_container.py` after the environment is synced. The script already verifies build, hardened runtime settings, health, a real tool call, and non-root UID.
+The container job runs `uv run --no-sync python scripts/container_smoke_test.py` after the environment is synced. The script already verifies build, hardened runtime settings, health, a real tool call, and non-root UID.
 
 The alternative is a Docker-aware pytest test that skips when Docker is unavailable. That improves reporting and keeps one test command, but slows local runs, adds skip logic, and duplicates what the script already proves.
 
@@ -67,7 +67,7 @@ Set workflow permissions to `contents: read`, reference no secrets, and use a co
 ## Risks / Trade-offs
 
 - **The Linux suites have not been run in this repo.** The integration tests are exercised on Windows locally, and the POSIX process-stop path is untested here. Mitigation: the first CI run validates it; run the integration suite in a Linux container locally if the first run fails.
-- **The container script is untracked.** The container job fails if `scripts/test_container.py` is not committed. Mitigation: commit the script and `data/titanic.db` with the workflow.
+- **The container script and database must stay tracked.** The container job fails if either is removed. Mitigation: keep `scripts/container_smoke_test.py` and `data/titanic.db` committed with the workflow.
 - **The Docker script has not been run end-to-end since the last Dockerfile change.** Mitigation: run it locally with Docker before merging, or treat the first CI run as the validation.
 - **Cold Docker builds dominate CI time.** Mitigation: measure the first runs; add GitHub Actions layer caching only if the job becomes the bottleneck.
 - **Base image pulls can fail transiently.** Mitigation: rerun the container job; pin or mirror base images later if it becomes recurrent.
@@ -76,7 +76,7 @@ Set workflow permissions to `contents: read`, reference no secrets, and use a co
 
 ## Migration Plan
 
-1. Commit `scripts/test_container.py`, `data/titanic.db`, and the workflow.
+1. Commit `scripts/container_smoke_test.py`, `data/titanic.db`, and the workflow.
 2. Open a pull request and confirm all four checks pass.
 3. Configure branch protection to require `quality`, `test (unit)`, `test (integration)`, and `container`.
 4. Rollback is deleting the workflow; it has no runtime effect.

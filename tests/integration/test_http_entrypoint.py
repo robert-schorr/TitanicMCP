@@ -4,6 +4,7 @@ import asyncio
 import os
 import shutil
 import socket
+import sqlite3
 import sys
 import time
 from pathlib import Path
@@ -125,14 +126,15 @@ def test_main_uses_the_configured_database_path(
     _clear_environment(monkeypatch)
     monkeypatch.setenv("TITANIC_MCP_DB_PATH", "custom/titanic.db")
     captured = _capture_run(monkeypatch)
-    recorded: dict[str, Path] = {}
+    recorded: dict[str, object] = {}
 
     def record_database(path: Path) -> object:
         recorded["path"] = path
 
         class FakeDatabase:
             def fetch_one(self, sql: str) -> dict[str, int]:
-                return {"1": 1}
+                recorded["sql"] = sql
+                return {"COUNT(*)": 891}
 
         return FakeDatabase()
 
@@ -141,6 +143,7 @@ def test_main_uses_the_configured_database_path(
     main()
 
     assert recorded["path"] == Path("custom/titanic.db")
+    assert "Observation" in str(recorded["sql"])
     assert captured["transport"] == "http"
 
 
@@ -159,6 +162,23 @@ def test_main_fails_before_serving_when_database_is_missing(
     assert "transport" not in captured
 
 
+def test_main_fails_before_serving_when_database_has_no_catalog(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _clear_environment(monkeypatch)
+    empty_database = tmp_path / "empty.db"
+    sqlite3.connect(empty_database).close()
+    monkeypatch.setenv("TITANIC_MCP_DB_PATH", str(empty_database))
+    captured = _capture_run(monkeypatch)
+
+    with pytest.raises(SystemExit) as exc_info:
+        main()
+
+    assert "missing the Titanic catalog" in str(exc_info.value)
+    assert "transport" not in captured
+
+
 def test_main_starts_the_remote_profile(monkeypatch: pytest.MonkeyPatch) -> None:
     _clear_environment(monkeypatch)
     monkeypatch.setenv("MCP_PROFILE", "remote")
@@ -173,7 +193,7 @@ def test_main_starts_the_remote_profile(monkeypatch: pytest.MonkeyPatch) -> None
         "host": "0.0.0.0",
         "port": 8000,
         "path": "/mcp",
-        "stateless_http": False,
+        "stateless_http": True,
         "host_origin_protection": True,
         "allowed_hosts": ["mcp.example.com", "localhost:8000"],
         "allowed_origins": ["https://app.example"],

@@ -5,7 +5,7 @@ read-only filesystem, database mount, and security settings as ``compose.yaml``,
 waits for ``/healthz``, calls ``list_tables`` through the published port, and
 checks that the runtime user is not root.
 
-    uv run python scripts/test_container.py
+    uv run python scripts/container_smoke_test.py
 
 This is a manual verification script, not part of the pytest suite.
 """
