@@ -3,7 +3,8 @@
 A read-only MCP server for the Titanic passenger manifest. It exposes the query
 core through three typed tools and serves MCP over Streamable HTTP with safe
 local defaults, an operational health endpoint, and explicit local, container,
-and remote profiles.
+and remote profiles. See [`docs/architecture.md`](docs/architecture.md) for
+design rationale and the full contracts.
 
 ## Setup
 
@@ -120,18 +121,6 @@ uv run titanic-mcp
 The client must then send `Authorization: Bearer <long-random-token>`. Use a
 reverse proxy for TLS termination; the server itself does not provide TLS.
 
-### Container profile example
-
-```powershell
-$env:MCP_PROFILE = "container"
-$env:MCP_ALLOWED_HOSTS = "localhost:8000,127.0.0.1:8000"
-uv run titanic-mcp
-```
-
-The `container` profile binds all interfaces inside the container and permits
-token omission because the deployment must publish the port only on loopback.
-See the exposure warning below.
-
 ## Container deployment
 
 The container image packages the same HTTP service. It runs as a non-root user,
@@ -146,41 +135,16 @@ must exist on the host.
 > allowing external access. The image itself does not enforce the loopback
 > binding; that protection comes from the Compose port mapping.
 
-### Build the image
+### Build and run
 
 ```powershell
 docker compose build
-```
-
-The multi-stage build uses the Debian Trixie slim variant for the uv builder
-and the `python:3.13-slim-trixie` runtime. It installs from `uv.lock` with
-`--frozen --no-default-groups --no-editable` and copies only the prepared virtual
-environment into the runtime stage. The runtime image contains no compiler
-toolchain, uv cache, project tests or test dependencies, database file, or
-secrets.
-
-### Run the default profile
-
-```powershell
 docker compose up -d
 ```
 
-The default profile sets `MCP_PROFILE=container` and
-`MCP_ALLOWED_HOSTS=localhost:8000,127.0.0.1:8000`, binds `0.0.0.0` inside the
-container, and publishes `127.0.0.1:8000` only. It also uses a read-only root
-filesystem, a read-only database mount, `no-new-privileges`, a 64 MB
-`noexec,nosuid` tmpfs at `/tmp`, and resource limits of 1 CPU, 512 MB memory,
-and 64 PIDs.
-
-Point the MCP client at `http://127.0.0.1:8000/mcp` using the client
-configuration shown above. No token is required for the default profile
-because the published port is not externally reachable.
-
-### Container healthcheck
-
-The container healthcheck calls `GET /healthz` with the Python standard
-library. It starts after 5 seconds, runs every 5 seconds, and marks the
-container unhealthy after five failed 3-second probes.
+The default profile publishes `127.0.0.1:8000` only, so no token is required.
+Inspect the resolved profile, mounts, ports, and security settings with
+`docker compose config`.
 
 ```powershell
 Invoke-RestMethod http://127.0.0.1:8000/healthz
@@ -190,20 +154,23 @@ docker inspect --format '{{.State.Health.Status}}' (docker compose ps -q titanic
 
 `GET /healthz` returns 200 without MCP initialization or authentication.
 `docker compose ps` reports `(healthy)` once the service is accepting requests.
+The image runs as UID/GID 10001 (`titanic`); `docker compose exec titanic-mcp id`
+confirms the runtime identity.
 
-### Test the container deployment
-
-With Docker running:
+To test the image with Docker running:
 
 ```powershell
 uv run python scripts/container_smoke_test.py
 ```
 
-The script builds `titanic-mcp:container-test`, starts it with the Compose
-security settings, waits for `/healthz`, calls `list_tables`, and verifies the
-process runs as UID 10001. It is intentionally separate from `uv run pytest`.
+The script builds `titanic-mcp:container-test` and starts it twice: once with the
+default `container` profile and once with the `remote` profile and a bearer
+token. Each run waits for `/healthz`, calls `list_tables`, and verifies the
+process runs as UID 10001. The remote run also verifies that unauthenticated MCP
+requests are rejected and that the token never reaches the logs. It is
+intentionally separate from `uv run pytest`.
 
-### Run the remote overlay
+### Remote overlay
 
 The remote overlay publishes port 8000 on all interfaces and requires a token
 and an explicit host allowlist. Compose interpolation fails before the
@@ -216,17 +183,13 @@ $env:MCP_ALLOWED_ORIGINS = "https://app.example.com"  # optional
 docker compose -f compose.yaml -f compose.remote.yaml up -d
 ```
 
-The overlay sets `MCP_PROFILE=remote`, replaces the loopback mapping with
-`8000:8000`, and inherits the read-only filesystem, tmpfs, read-only database
-mount, `no-new-privileges`, resource limits, restart policy, and healthcheck
-from `compose.yaml`.
-
-MCP clients must send `Authorization: Bearer <long-random-token>`. Requests
-without a valid token receive HTTP 401. Use the public host value in
-`MCP_ALLOWED_HOSTS`; when TLS terminates at a reverse proxy, include the Host
-header that the proxy forwards (without a port for the default HTTPS port).
-Set `MCP_ALLOWED_ORIGINS` only when a browser client calls the service
-cross-origin.
+The overlay sets `MCP_PROFILE=remote` and inherits the security settings,
+restart policy, and healthcheck from `compose.yaml`. MCP clients must send
+`Authorization: Bearer <long-random-token>`; requests without a valid token
+receive HTTP 401. Use the public host value in `MCP_ALLOWED_HOSTS`; when TLS
+terminates at a reverse proxy, include the Host header that the proxy forwards
+(without a port for the default HTTPS port). Set `MCP_ALLOWED_ORIGINS` only when
+a browser client calls the service cross-origin.
 
 To stop the overlay:
 
@@ -239,7 +202,6 @@ docker compose -f compose.yaml -f compose.remote.yaml down
 ```powershell
 docker compose config
 docker compose logs --tail=50 titanic-mcp
-docker compose exec titanic-mcp id
 docker compose down
 ```
 
@@ -249,8 +211,6 @@ docker compose down
   `MCP_AUTH_TOKEN`. `/healthz` remains unauthenticated.
 - HTTP 421 or 403: add the client's Host or Origin value to
   `MCP_ALLOWED_HOSTS` or `MCP_ALLOWED_ORIGINS`.
-- The container exits with a configuration error: `MCP_PROFILE=remote` requires
-  both `MCP_AUTH_TOKEN` and `MCP_ALLOWED_HOSTS`.
 - The server exits because the database is missing: ensure `data/titanic.db`
   exists; the container mounts it read-only and never copies it into the image.
   When running an installed package outside the repo, set `TITANIC_MCP_DB_PATH`.
@@ -258,49 +218,24 @@ docker compose down
   the other container using the port, then retry.
 - Source changes are not visible: rebuild with
   `docker compose up -d --build`.
-- Inspect the resolved profile, mounts, ports, and healthcheck with
-  `docker compose config`.
 
-The image runs as UID/GID 10001 (`titanic`).
-`docker compose exec titanic-mcp id` confirms the runtime identity.
-
-## Authentication
+## Authentication and host protection
 
 When `MCP_AUTH_TOKEN` is set, MCP requests must include
-`Authorization: Bearer <token>`. Missing or invalid tokens receive HTTP 401 and
-never reach tool execution. `GET /healthz` bypasses authentication.
+`Authorization: Bearer <token>`; missing or invalid tokens receive HTTP 401 and
+never reach tool execution. `/healthz` bypasses authentication. Host/origin
+protection rejects a disallowed Host with HTTP 421 and a disallowed Origin with
+HTTP 403, but it is not CORS: browser clients that need cross-origin access still
+require CORS configuration at the client or proxy layer.
 
 Authentication uses FastMCP's static token verifier. It is suitable for a
 private, read-only service; it is not OAuth, does not provide user accounts, and
 stores the configured token in memory. The token is read from the environment
-and never logged, returned to clients, or embedded in source.
-
-## Host and origin protection
-
-Host/origin protection rejects requests before MCP handling:
-
-- A Host that is not allowed receives HTTP 421.
-- An Origin that is not allowed receives HTTP 403.
-- `GET /healthz` remains reachable for probes.
-
-`local` uses automatic protection for loopback-bound serving. `container` and
-`remote` use strict protection and require an explicit `MCP_ALLOWED_HOSTS`.
-`MCP_ALLOWED_ORIGINS` is optional; set it when a browser client must call the
-server cross-origin.
-
-Host/origin protection is not CORS. Browser JavaScript that must read
-cross-origin responses still needs separate CORS configuration at the client or
-proxy layer.
-
-> **Exposure warning:** the bind address is not the same as public exposure.
-> The `local` profile rejects non-loopback binds. The `container` profile binds
-> `0.0.0.0` inside its network namespace, so the deployment must publish it only
-> to loopback. Before exposing the service externally, use the `remote` profile
-> with a strong token, an explicit host allowlist, and TLS termination at a
-> reverse proxy.
+and never logged, returned to clients, or embedded in source. See
+[`docs/architecture.md`](docs/architecture.md#9-security-model) for the full
+security model.
 
 ## Tools
-
 
 ### `list_tables`
 
@@ -333,8 +268,34 @@ columns, their types, nullability, and `default_order_by`.
 }
 ```
 
+Example response (trimmed after the second column):
+
+```json
+{
+  "name": "passengers",
+  "kind": "view",
+  "description": "Logical view of the Titanic manifest with decoded labels and one row per observation; recommended as the starting point for analysis.",
+  "row_count": 891,
+  "default_order_by": "passenger_id",
+  "columns": [
+    {
+      "name": "passenger_id",
+      "type": "integer",
+      "nullable": false,
+      "description": "Observation row identifier (Observation.rowid)."
+    },
+    {
+      "name": "survived",
+      "type": "integer",
+      "nullable": false,
+      "description": "Survival indicator (0 = died, 1 = survived)."
+    }
+  ]
+}
+```
+
 The passenger description contains 16 columns and uses `passenger_id` as the
-default order.
+default order. `type` is one of `integer`, `number`, `text`, or `boolean`.
 
 ### `query_data`
 
@@ -408,42 +369,21 @@ Invalid arguments: filter[0].op, limit
 ```
 
 Client responses never contain Pydantic messages, SQL text, parameter values,
-or tracebacks.
+or tracebacks. See
+[`docs/architecture.md`](docs/architecture.md#6-error-contract) for the mapping
+to log statuses and error types.
 
 ## Structured logging
 
-The server writes one canonical JSON `tool_call` record per call to stderr:
+The server writes one canonical JSON `event="tool_call"` record per call to
+stderr. Records contain metadata only: tool name, request and correlation IDs,
+duration, status, error type, table, filter count, and field paths. They never
+contain filter values, raw arguments, SQL, parameters, or tokens. Uvicorn's own
+startup and access logs remain plain text.
 
-```json
-{
-  "timestamp": "2026-10-27T19:01:48.564346Z",
-  "level": "INFO",
-  "logger": "titanic_mcp.server",
-  "message": "tool_call",
-  "event": "tool_call",
-  "tool_name": "query_data",
-  "request_id": "3",
-  "correlation_id": null,
-  "duration_ms": 6.933,
-  "status": "invalid_arguments",
-  "error_type": "validation_error",
-  "table": "passengers",
-  "filter_count": 0,
-  "field_paths": ["limit"]
-}
-```
-
-`status` is one of `ok`, `invalid_arguments`, or `internal_error`. `error_type` is
-one of `none`, `validation_error`, `domain_validation`, or
-`unexpected_exception`.
-
-Internal diagnostics (validation error types/locations and unexpected exception
-tracebacks) are logged separately. The canonical record never contains filter
-values, raw arguments, authorization headers, SQL, or parameter values.
-
-Uvicorn's own startup and access logs still use plain text rather than the
-application's JSON formatter. Routing them through the JSON formatter is a
-possible TODO; until then, log ingestion must handle both formats.
+The full record shape, `status` and `error_type` values, and redaction rules are
+in
+[`docs/architecture.md`](docs/architecture.md#7-logging-contract).
 
 ## Development quality gates
 

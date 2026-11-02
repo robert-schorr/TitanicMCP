@@ -1,9 +1,11 @@
 """Build and smoke-test the container deployment.
 
-Requires a running Docker daemon. Builds the image, starts it with the same
-read-only filesystem, database mount, and security settings as ``compose.yaml``,
-waits for ``/healthz``, calls ``list_tables`` through the published port, and
-checks that the runtime user is not root.
+Requires a running Docker daemon. Builds the image, then starts it with the same
+read-only filesystem, database mount, and security settings as ``compose.yaml``.
+Checks the default ``container`` profile, then the ``remote`` profile with
+bearer-token authentication: waits for ``/healthz``, rejects unauthenticated MCP
+requests, calls ``list_tables`` through the published port, checks that the
+token never reaches the logs, and checks that the runtime user is not root.
 
     uv run python scripts/container_smoke_test.py
 
@@ -54,6 +56,44 @@ def docker(*args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
+def start_container(
+    name: str, port: int, profile: str, extra_env: tuple[str, ...] = ()
+) -> bool:
+    allowed_hosts = f"localhost:8000,127.0.0.1:8000,localhost:{port},127.0.0.1:{port}"
+    environment = [
+        f"MCP_PROFILE={profile}",
+        "TITANIC_MCP_DB_PATH=/app/data/titanic.db",
+        f"MCP_ALLOWED_HOSTS={allowed_hosts}",
+        *extra_env,
+    ]
+    args = [
+        "run",
+        "--detach",
+        "--name",
+        name,
+        "--publish",
+        f"127.0.0.1:{port}:8000",
+    ]
+    for entry in environment:
+        args += ["--env", entry]
+    args += [
+        "--mount",
+        f"type=bind,source={DB_PATH},target=/app/data/titanic.db,readonly",
+        "--read-only",
+        "--tmpfs",
+        "/tmp:noexec,nosuid,size=64m",
+        "--security-opt",
+        "no-new-privileges:true",
+        IMAGE,
+    ]
+
+    started = docker(*args)
+    if started.returncode != 0:
+        print(started.stderr.strip(), file=sys.stderr)
+        return False
+    return True
+
+
 def wait_for_health(port: int, container: str, timeout: float = 60) -> bool:
     deadline = time.monotonic() + timeout
     last_error: Exception | None = None
@@ -87,12 +127,101 @@ def print_logs(container: str) -> None:
         print(output)
 
 
-async def call_list_tables(url: str) -> tuple[list[str], int]:
-    transport = StreamableHttpTransport(url=url)
+def unauthenticated_status(url: str) -> int | None:
+    request = urllib.request.Request(
+        url,
+        data=json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-06-18",
+                    "capabilities": {},
+                    "clientInfo": {"name": "container-smoke-test", "version": "0.1.0"},
+                },
+            }
+        ).encode(),
+        headers={
+            "accept": "application/json, text/event-stream",
+            "content-type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            return response.status
+    except urllib.error.HTTPError as exc:
+        return exc.code
+    except (urllib.error.URLError, OSError):
+        return None
+
+
+async def call_list_tables(url: str, token: str | None = None) -> tuple[list[str], int]:
+    headers = {"authorization": f"Bearer {token}"} if token else None
+    transport = StreamableHttpTransport(url=url, headers=headers)
     async with Client(transport, timeout=30) as client:
         tools = [tool.name for tool in await client.list_tools()]
         result = await client.call_tool("list_tables", {})
     return tools, len(result.data)
+
+
+def check_container(
+    profile: str, container: str, port: int, token: str | None = None
+) -> int:
+    failures = 0
+    url = f"http://127.0.0.1:{port}/mcp"
+
+    if not check(f"{profile}: container is healthy", wait_for_health(port, container)):
+        return 1
+
+    if token is not None and not check(
+        f"{profile}: unauthenticated request rejected",
+        unauthenticated_status(url) == 401,
+    ):
+        failures += 1
+
+    try:
+        tools, row_count = asyncio.run(call_list_tables(url, token))
+    except Exception as exc:  # noqa: BLE001 - report any client failure
+        print_logs(container)
+        failures += 1
+        check(f"{profile}: list_tables call", False, repr(exc))
+    else:
+        if not check(f"{profile}: tool names", tools == list(NAMES), str(tools)):
+            failures += 1
+        if not check(f"{profile}: list_tables returns 9 rows", row_count == 9):
+            failures += 1
+
+    if token is not None:
+        logs = docker("logs", container)
+        if not check(
+            f"{profile}: token not logged",
+            token not in logs.stdout + logs.stderr,
+        ):
+            failures += 1
+
+    uid = docker("exec", container, "python", "-c", "import os; print(os.getuid())")
+    if uid.returncode != 0:
+        failures += 1
+        check(f"{profile}: runtime UID", False, uid.stderr.strip())
+    elif not check(f"{profile}: runtime UID is 10001", uid.stdout.strip() == "10001"):
+        failures += 1
+
+    return failures
+
+
+def run_profile(profile: str, token: str | None = None) -> int:
+    container = f"titanic-mcp-{profile}-{uuid.uuid4().hex[:8]}"
+    port = free_port()
+    extra_env = (f"MCP_AUTH_TOKEN={token}",) if token else ()
+    try:
+        if not start_container(container, port, profile, extra_env):
+            return 1
+        print(f"Started {profile} container {container} on port {port}")
+        return check_container(profile, container, port, token)
+    finally:
+        docker("rm", "--force", container)
 
 
 def main() -> int:
@@ -116,62 +245,7 @@ def main() -> int:
         print("Image build failed.", file=sys.stderr)
         return 1
 
-    container = f"titanic-mcp-test-{uuid.uuid4().hex[:8]}"
-    port = free_port()
-    url = f"http://127.0.0.1:{port}/mcp"
-    failures = 0
-
-    try:
-        started = docker(
-            "run",
-            "--detach",
-            "--name",
-            container,
-            "--publish",
-            f"127.0.0.1:{port}:8000",
-            "--env",
-            "MCP_PROFILE=container",
-            "--env",
-            "TITANIC_MCP_DB_PATH=/app/data/titanic.db",
-            "--env",
-            f"MCP_ALLOWED_HOSTS=localhost:8000,127.0.0.1:8000,localhost:{port},127.0.0.1:{port}",
-            "--mount",
-            f"type=bind,source={DB_PATH},target=/app/data/titanic.db,readonly",
-            "--read-only",
-            "--tmpfs",
-            "/tmp:noexec,nosuid,size=64m",
-            "--security-opt",
-            "no-new-privileges:true",
-            IMAGE,
-        )
-        if started.returncode != 0:
-            print(started.stderr.strip(), file=sys.stderr)
-            return 1
-
-        print(f"Started {container} at {url}")
-        if not check("container is healthy", wait_for_health(port, container)):
-            return 1
-
-        try:
-            tools, row_count = asyncio.run(call_list_tables(url))
-        except Exception as exc:  # noqa: BLE001 - report any client failure
-            print_logs(container)
-            failures += 1
-            check("list_tables call", False, repr(exc))
-        else:
-            if not check("tool names", tools == list(NAMES), str(tools)):
-                failures += 1
-            if not check("list_tables returns 9 rows", row_count == 9):
-                failures += 1
-
-        uid = docker("exec", container, "python", "-c", "import os; print(os.getuid())")
-        if uid.returncode != 0:
-            failures += 1
-            check("runtime UID", False, uid.stderr.strip())
-        elif not check("runtime UID is 10001", uid.stdout.strip() == "10001"):
-            failures += 1
-    finally:
-        docker("rm", "--force", container)
+    failures = run_profile("container") + run_profile("remote", uuid.uuid4().hex)
 
     if failures:
         print(f"\n{failures} container check(s) failed.")

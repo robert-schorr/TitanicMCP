@@ -6,7 +6,7 @@
 - Before finishing, run and pass all four gates:
   `uv run pytest`, `uv run ruff check .`, `uv run ruff format --check .`, `uv run ty check`.
 - `ty` is the type checker; do not substitute mypy or pyright.
-- When Docker is available, also run `uv run python scripts/container_smoke_test.py`; it builds the image and verifies health, a real tool call, and the non-root runtime user.
+- When Docker is available, also run `uv run python scripts/container_smoke_test.py`; it builds the image and verifies health, a real tool call, remote bearer-token auth, and the non-root runtime user.
 
 ## OpenSpec
 
